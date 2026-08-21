@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
 import { Image } from 'expo-image';
 import { Platform, StyleSheet } from 'react-native';
 
@@ -8,6 +10,19 @@ import { ThemedView } from '@/components/themed-view';
 import { Link } from 'expo-router';
 
 export default function HomeScreen() {
+  useEffect(() => {
+  async function testConnection() {
+    const { data, error } = await supabase.auth.getSession();
+
+    if (error) {
+      console.log('Supabase error:', error.message);
+    } else {
+      console.log('Supabase connected:', !!data.session);
+    }
+  }
+
+  testConnection();
+}, []);
   return (
     <ParallaxScrollView
       headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
@@ -19,6 +34,9 @@ export default function HomeScreen() {
       }>
       <ThemedView style={styles.titleContainer}>
         <ThemedText type="title">Food App</ThemedText>
+        <Link href="/auth">
+  <ThemedText type="subtitle">Open Login</ThemedText>
+</Link>
         <HelloWave />
       </ThemedView>
       <ThemedView style={styles.stepContainer}>
