@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Image } from 'expo-image';
+import { useEffect } from 'react';
 import { Platform, StyleSheet } from 'react-native';
 
 import { HelloWave } from '@/components/hello-wave';
@@ -33,12 +33,22 @@ export default function HomeScreen() {
         />
       }>
       <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Food App</ThemedText>
-        <Link href="/auth">
+  <ThemedText type="title">Food App</ThemedText>
+  <HelloWave />
+</ThemedView>
+
+<Link href="/auth">
   <ThemedText type="subtitle">Open Login</ThemedText>
 </Link>
-        <HelloWave />
-      </ThemedView>
+
+<Link href="/create-profile">
+  <ThemedText type="subtitle">Create Profile</ThemedText>
+</Link>
+
+<Link href="/profile">
+  <ThemedText type="subtitle">View Profile</ThemedText>
+</Link>
+
       <ThemedView style={styles.stepContainer}>
         <ThemedText type="subtitle">Rate what you Eat</ThemedText>
         <ThemedText>
