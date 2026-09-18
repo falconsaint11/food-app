@@ -1,13 +1,13 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
@@ -16,6 +16,11 @@ type RestaurantOption = {
   id: string;
   name: string;
   city: string | null;
+};
+
+type SavedRanking = {
+  restaurant_id: string;
+  rank: number;
 };
 
 export default function RankRestaurantsScreen() {
@@ -44,7 +49,7 @@ export default function RankRestaurantsScreen() {
       return;
     }
 
-    const { data, error } = await supabase
+    const { data: reviewData, error: reviewError } = await supabase
       .from('reviews')
       .select(`
         dishes (
@@ -57,16 +62,15 @@ export default function RankRestaurantsScreen() {
       `)
       .eq('user_id', user.id);
 
-    setLoading(false);
-
-    if (error) {
-      Alert.alert('Error', error.message);
+    if (reviewError) {
+      setLoading(false);
+      Alert.alert('Error', reviewError.message);
       return;
     }
 
     const uniqueMap = new Map<string, RestaurantOption>();
 
-    for (const row of data ?? []) {
+    for (const row of reviewData ?? []) {
       const restaurant =
         (row.dishes as any)?.restaurants as RestaurantOption | null;
 
@@ -76,6 +80,25 @@ export default function RankRestaurantsScreen() {
     }
 
     setRestaurants(Array.from(uniqueMap.values()));
+
+    const { data: rankingData, error: rankingError } = await supabase
+      .from('restaurant_rankings')
+      .select('restaurant_id, rank')
+      .eq('user_id', user.id)
+      .order('rank', { ascending: true });
+
+    setLoading(false);
+
+    if (rankingError) {
+      Alert.alert('Ranking error', rankingError.message);
+      return;
+    }
+
+    const savedRankings = (rankingData ?? []) as SavedRanking[];
+
+    setSelected(
+      savedRankings.map((item) => item.restaurant_id)
+    );
   }
 
   function toggleRestaurant(id: string) {
@@ -95,7 +118,10 @@ export default function RankRestaurantsScreen() {
 
   async function saveRankings() {
     if (selected.length === 0) {
-      Alert.alert('No restaurants selected', 'Choose at least one restaurant.');
+      Alert.alert(
+        'No restaurants selected',
+        'Choose at least one restaurant.'
+      );
       return;
     }
 
@@ -154,6 +180,7 @@ export default function RankRestaurantsScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Rank Top Restaurants</Text>
+
       <Text style={styles.subtitle}>
         Tap restaurants in the order you want them ranked.
       </Text>
@@ -163,11 +190,14 @@ export default function RankRestaurantsScreen() {
           <Text style={styles.selectedTitle}>Your ranking</Text>
 
           {selected.map((id, index) => {
-            const restaurant = restaurants.find((item) => item.id === id);
+            const restaurant = restaurants.find(
+              (item) => item.id === id
+            );
 
             return (
               <Text key={id} style={styles.selectedItem}>
-                {index + 1}. {restaurant?.name ?? 'Unknown restaurant'}
+                {index + 1}.{' '}
+                {restaurant?.name ?? 'Unknown restaurant'}
               </Text>
             );
           })}
@@ -182,20 +212,27 @@ export default function RankRestaurantsScreen() {
             key={restaurant.id}
             style={[
               styles.restaurantCard,
-              rankIndex !== -1 && styles.restaurantCardSelected,
+              rankIndex !== -1 &&
+                styles.restaurantCardSelected,
             ]}
             onPress={() => toggleRestaurant(restaurant.id)}
           >
             <View style={styles.restaurantInfo}>
-              <Text style={styles.restaurantName}>{restaurant.name}</Text>
+              <Text style={styles.restaurantName}>
+                {restaurant.name}
+              </Text>
 
               {restaurant.city ? (
-                <Text style={styles.city}>{restaurant.city}</Text>
+                <Text style={styles.city}>
+                  {restaurant.city}
+                </Text>
               ) : null}
             </View>
 
             {rankIndex !== -1 ? (
-              <Text style={styles.rankNumber}>#{rankIndex + 1}</Text>
+              <Text style={styles.rankNumber}>
+                #{rankIndex + 1}
+              </Text>
             ) : null}
           </TouchableOpacity>
         );

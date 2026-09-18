@@ -1,12 +1,13 @@
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
@@ -61,6 +62,11 @@ export default function UserProfileScreen() {
   const [diary, setDiary] = useState<DiaryEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followerCount, setFollowerCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
   useFocusEffect(
     useCallback(() => {
       loadProfile();
@@ -93,6 +99,39 @@ export default function UserProfileScreen() {
     }
 
     setProfile(profileData);
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    setCurrentUserId(user?.id ?? null);
+
+    if (user && user.id !== id) {
+      const { data: followData } = await supabase
+        .from('follows')
+        .select('id')
+        .eq('follower_id', user.id)
+        .eq('following_id', id)
+        .maybeSingle();
+
+      setIsFollowing(!!followData);
+    } else {
+      setIsFollowing(false);
+    }
+
+    const { count: followers } = await supabase
+      .from('follows')
+      .select('*', { count: 'exact', head: true })
+      .eq('following_id', id);
+
+    setFollowerCount(followers ?? 0);
+
+    const { count: following } = await supabase
+      .from('follows')
+      .select('*', { count: 'exact', head: true })
+      .eq('follower_id', id);
+
+    setFollowingCount(following ?? 0);
 
     const { data: dishData, error: dishError } = await supabase
       .from('dish_rankings')
@@ -170,6 +209,51 @@ export default function UserProfileScreen() {
     setDiary((diaryData ?? []) as unknown as DiaryEntry[]);
   }
 
+  async function toggleFollow() {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user || !id) {
+      Alert.alert('Error', 'You must be signed in.');
+      return;
+    }
+
+    if (user.id === id) {
+      return;
+    }
+
+    if (isFollowing) {
+      const { error } = await supabase
+        .from('follows')
+        .delete()
+        .eq('follower_id', user.id)
+        .eq('following_id', id);
+
+      if (error) {
+        Alert.alert('Unfollow error', error.message);
+        return;
+      }
+
+      setIsFollowing(false);
+      setFollowerCount((current) => Math.max(0, current - 1));
+    } else {
+      const { error } = await supabase.from('follows').insert({
+        follower_id: user.id,
+        following_id: id,
+      });
+
+      if (error) {
+        Alert.alert('Follow error', error.message);
+        return;
+      }
+
+      setIsFollowing(true);
+      setFollowerCount((current) => current + 1);
+    }
+  }
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -201,6 +285,55 @@ export default function UserProfileScreen() {
       </Text>
 
       <Text style={styles.username}>@{profile.username}</Text>
+
+      <View style={styles.followStats}>
+        <TouchableOpacity
+          style={styles.statItem}
+          onPress={() =>
+            router.push({
+              pathname: '/followers',
+              params: { userId: id },
+            })
+          }
+        >
+          <Text style={styles.statNumber}>{followerCount}</Text>
+          <Text style={styles.statLabel}>
+            {followerCount === 1 ? 'Follower' : 'Followers'}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.statItem}
+          onPress={() =>
+            router.push({
+              pathname: '/following',
+              params: { userId: id },
+            })
+          }
+        >
+          <Text style={styles.statNumber}>{followingCount}</Text>
+          <Text style={styles.statLabel}>Following</Text>
+        </TouchableOpacity>
+      </View>
+
+      {currentUserId !== id ? (
+        <TouchableOpacity
+          style={[
+            styles.followButton,
+            isFollowing && styles.followingButton,
+          ]}
+          onPress={toggleFollow}
+        >
+          <Text
+            style={[
+              styles.followButtonText,
+              isFollowing && styles.followingButtonText,
+            ]}
+          >
+            {isFollowing ? 'Following' : 'Follow'}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
 
       {profile.bio ? <Text style={styles.bio}>{profile.bio}</Text> : null}
 
@@ -328,6 +461,45 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 4,
     color: '#666666',
+  },
+  followStats: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 16,
+    gap: 30,
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statNumber: {
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  statLabel: {
+    fontSize: 14,
+    color: '#666666',
+    marginTop: 2,
+  },
+  followButton: {
+    alignSelf: 'center',
+    backgroundColor: '#111111',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 14,
+  },
+  followButtonText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  followingButton: {
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#cccccc',
+  },
+  followingButtonText: {
+    color: '#111111',
   },
   bio: {
     fontSize: 16,

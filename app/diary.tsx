@@ -1,12 +1,14 @@
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
@@ -15,6 +17,7 @@ type DiaryEntry = {
   id: string;
   rating: number;
   review_text: string | null;
+  photo_path: string | null;
   date_eaten: string;
   dishes: {
     name: string;
@@ -55,6 +58,7 @@ export default function DiaryScreen() {
         id,
         rating,
         review_text,
+        photo_path,
         date_eaten,
         dishes (
           name,
@@ -78,6 +82,24 @@ export default function DiaryScreen() {
     setDiary((data ?? []) as unknown as DiaryEntry[]);
   }
 
+  function getPhotoUrl(path: string) {
+    const { data } = supabase.storage
+      .from('review-photos')
+      .getPublicUrl(path);
+
+    return data.publicUrl;
+  }
+
+  function formatDate(date: string) {
+    const parsedDate = new Date(`${date}T00:00:00`);
+
+    return parsedDate.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  }
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -89,37 +111,85 @@ export default function DiaryScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Diary</Text>
-      <Text style={styles.subtitle}>Everything you've logged.</Text>
+
+      <Text style={styles.subtitle}>
+        Everything you've logged.
+      </Text>
 
       {diary.length === 0 ? (
-        <Text style={styles.emptyText}>Nothing logged yet.</Text>
+        <Text style={styles.emptyText}>
+          Nothing logged yet.
+        </Text>
       ) : (
-        diary.map((entry) => (
-          <View key={entry.id} style={styles.diaryCard}>
-            <View style={styles.topRow}>
-              <View style={styles.info}>
-                <Text style={styles.dishName}>
-                  {entry.dishes?.name ?? 'Unknown dish'}
-                </Text>
+        diary.map((entry) => {
+          const photoUrl = entry.photo_path
+            ? getPhotoUrl(entry.photo_path)
+            : null;
 
-                <Text style={styles.restaurantName}>
-                  {entry.dishes?.restaurants?.name ?? 'Unknown restaurant'}
-                  {entry.dishes?.restaurants?.city
-                    ? ` · ${entry.dishes.restaurants.city}`
-                    : ''}
+          return (
+            <TouchableOpacity
+              key={entry.id}
+              style={styles.diaryCard}
+              activeOpacity={0.75}
+              onPress={() =>
+                router.push({
+                  pathname: '/review/[id]',
+                  params: {
+                    id: entry.id,
+                  },
+                })
+              }
+            >
+              <View style={styles.topRow}>
+                <View style={styles.info}>
+                  <Text style={styles.dishName}>
+                    {entry.dishes?.name ?? 'Unknown dish'}
+                  </Text>
+
+                  <Text style={styles.restaurantName}>
+                    {entry.dishes?.restaurants?.name ??
+                      'Unknown restaurant'}
+
+                    {entry.dishes?.restaurants?.city
+                      ? ` · ${entry.dishes.restaurants.city}`
+                      : ''}
+                  </Text>
+                </View>
+
+                <Text style={styles.rating}>
+                  {entry.rating}★
                 </Text>
               </View>
 
-              <Text style={styles.rating}>{entry.rating}★</Text>
-            </View>
+              {photoUrl ? (
+                <Image
+                  source={{ uri: photoUrl }}
+                  style={styles.photo}
+                  resizeMode="cover"
+                />
+              ) : null}
 
-            {entry.review_text ? (
-              <Text style={styles.reviewText}>{entry.review_text}</Text>
-            ) : null}
+              {entry.review_text ? (
+                <Text
+                  style={styles.reviewText}
+                  numberOfLines={3}
+                >
+                  {entry.review_text}
+                </Text>
+              ) : null}
 
-            <Text style={styles.date}>{entry.date_eaten}</Text>
-          </View>
-        ))
+              <View style={styles.bottomRow}>
+                <Text style={styles.date}>
+                  {formatDate(entry.date_eaten)}
+                </Text>
+
+                <Text style={styles.viewReview}>
+                  View review
+                </Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })
       )}
     </ScrollView>
   );
@@ -130,6 +200,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: 24,
     paddingTop: 70,
+    paddingBottom: 50,
     backgroundColor: '#ffffff',
   },
   centered: {
@@ -149,7 +220,7 @@ const styles = StyleSheet.create({
     marginBottom: 26,
   },
   diaryCard: {
-    paddingVertical: 16,
+    paddingVertical: 18,
     borderBottomWidth: 1,
     borderBottomColor: '#eeeeee',
   },
@@ -164,7 +235,7 @@ const styles = StyleSheet.create({
   },
   dishName: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   restaurantName: {
     fontSize: 14,
@@ -175,15 +246,32 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
+  photo: {
+    width: '100%',
+    aspectRatio: 4 / 3,
+    borderRadius: 12,
+    marginTop: 12,
+    backgroundColor: '#eeeeee',
+  },
   reviewText: {
     fontSize: 15,
     lineHeight: 21,
-    marginTop: 8,
+    marginTop: 10,
+  },
+  bottomRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 10,
   },
   date: {
     fontSize: 12,
     color: '#999999',
-    marginTop: 8,
+  },
+  viewReview: {
+    fontSize: 12,
+    color: '#777777',
+    fontWeight: '600',
   },
   emptyText: {
     fontSize: 15,

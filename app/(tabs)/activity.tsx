@@ -1,4 +1,4 @@
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -6,32 +6,23 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
 
-import { supabase } from '@/lib/supabase';
-
-type ActivityItem = {
-  id: string;
-  rating: number;
-  review_text: string | null;
-  created_at: string;
-  profiles: {
-    username: string;
-    display_name: string | null;
-  } | null;
-  dishes: {
-    name: string;
-    restaurants: {
-      name: string;
-      city: string | null;
-    } | null;
-  } | null;
-};
+import {
+  getNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+  NotificationItem,
+} from '@/lib/notifications';
 
 export default function ActivityScreen() {
-  const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [notifications, setNotifications] = useState<
+    NotificationItem[]
+  >([]);
   const [loading, setLoading] = useState(true);
+  const [markingAll, setMarkingAll] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -42,68 +33,175 @@ export default function ActivityScreen() {
   async function loadActivity() {
     setLoading(true);
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+    try {
+      const data = await getNotifications();
+      setNotifications(data);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Could not load activity.';
 
-    if (userError || !user) {
+      Alert.alert('Activity error', message);
+    } finally {
       setLoading(false);
-      Alert.alert('Error', 'You must be signed in.');
-      return;
     }
-
-    const { data: follows, error: followsError } = await supabase
-      .from('follows')
-      .select('following_id')
-      .eq('follower_id', user.id);
-
-    if (followsError) {
-      setLoading(false);
-      Alert.alert('Follow error', followsError.message);
-      return;
-    }
-
-    const followingIds = (follows ?? []).map((row) => row.following_id);
-
-    if (followingIds.length === 0) {
-      setActivity([]);
-      setLoading(false);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from('reviews')
-      .select(`
-        id,
-        rating,
-        review_text,
-        created_at,
-        profiles:user_id (
-          username,
-          display_name
-        ),
-        dishes (
-          name,
-          restaurants (
-            name,
-            city
-          )
-        )
-      `)
-      .in('user_id', followingIds)
-      .order('created_at', { ascending: false })
-      .limit(50);
-
-    setLoading(false);
-
-    if (error) {
-      Alert.alert('Activity error', error.message);
-      return;
-    }
-
-    setActivity((data ?? []) as unknown as ActivityItem[]);
   }
+
+  async function openNotification(
+    item: NotificationItem
+  ) {
+    if (!item.isRead) {
+      try {
+        await markNotificationRead(item.id);
+
+        setNotifications((current) =>
+          current.map((notification) =>
+            notification.id === item.id
+              ? {
+                  ...notification,
+                  isRead: true,
+                }
+              : notification
+          )
+        );
+      } catch (error) {
+        console.log(
+          'Could not mark notification read:',
+          error
+        );
+      }
+    }
+
+    if (item.type === 'follow') {
+      router.push({
+        pathname: '/user/[id]',
+        params: {
+          id: item.actorId,
+        },
+      });
+
+      return;
+    }
+
+    if (item.reviewId) {
+      router.push({
+        pathname: '/review/[id]',
+        params: {
+          id: item.reviewId,
+        },
+      });
+    }
+  }
+
+  async function handleMarkAllRead() {
+    const unreadKeys = notifications
+      .filter((item) => !item.isRead)
+      .map((item) => item.id);
+
+    if (unreadKeys.length === 0) {
+      return;
+    }
+
+    setMarkingAll(true);
+
+    try {
+      await markAllNotificationsRead(unreadKeys);
+
+      setNotifications((current) =>
+        current.map((item) => ({
+          ...item,
+          isRead: true,
+        }))
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Could not mark notifications as read.';
+
+      Alert.alert('Error', message);
+    } finally {
+      setMarkingAll(false);
+    }
+  }
+
+  function formatTimeAgo(date: string) {
+    const now = Date.now();
+    const then = new Date(date).getTime();
+
+    const seconds = Math.floor(
+      (now - then) / 1000
+    );
+
+    if (seconds < 60) {
+      return 'Just now';
+    }
+
+    const minutes = Math.floor(
+      seconds / 60
+    );
+
+    if (minutes < 60) {
+      return `${minutes}m`;
+    }
+
+    const hours = Math.floor(
+      minutes / 60
+    );
+
+    if (hours < 24) {
+      return `${hours}h`;
+    }
+
+    const days = Math.floor(
+      hours / 24
+    );
+
+    if (days < 7) {
+      return `${days}d`;
+    }
+
+    return new Date(date).toLocaleDateString(
+      undefined,
+      {
+        month: 'short',
+        day: 'numeric',
+      }
+    );
+  }
+
+  function getNotificationText(
+    item: NotificationItem
+  ) {
+    if (item.type === 'follow') {
+      return 'started following you.';
+    }
+
+    if (item.type === 'reaction') {
+      return `reacted ${item.reaction} to your review of ${item.dishName}.`;
+    }
+
+    return `commented on your review of ${item.dishName}.`;
+  }
+
+  function getNotificationIcon(
+    item: NotificationItem
+  ) {
+    if (item.type === 'follow') {
+      return '👤';
+    }
+
+    if (item.type === 'reaction') {
+      return item.reaction ?? '❤️';
+    }
+
+    return '💬';
+  }
+
+  const unreadCount = notifications.filter(
+    (item) => !item.isRead
+  ).length;
 
   if (loading) {
     return (
@@ -114,51 +212,109 @@ export default function ActivityScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Activity</Text>
-      <Text style={styles.subtitle}>
-        See what people you follow are eating.
-      </Text>
+    <ScrollView
+      contentContainerStyle={styles.container}
+    >
+      <View style={styles.headerRow}>
+        <View style={styles.headerText}>
+          <Text style={styles.title}>
+            Activity
+          </Text>
 
-      {activity.length === 0 ? (
+          <Text style={styles.subtitle}>
+            Reactions, comments, and new followers.
+          </Text>
+        </View>
+
+        {unreadCount > 0 ? (
+          <TouchableOpacity
+            onPress={handleMarkAllRead}
+            disabled={markingAll}
+          >
+            <Text style={styles.markAll}>
+              {markingAll
+                ? '...'
+                : 'Mark all read'}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      {notifications.length === 0 ? (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>No activity yet</Text>
+          <Text style={styles.emptyTitle}>
+            No notifications yet
+          </Text>
+
           <Text style={styles.emptyText}>
-            Follow people in Discover to start building your feed.
+            When people follow you, react to your
+            reviews, or leave comments, you&apos;ll
+            see it here.
           </Text>
         </View>
       ) : (
-        activity.map((item) => (
-          <View key={item.id} style={styles.card}>
-            <Text style={styles.userName}>
-              {item.profiles?.display_name || item.profiles?.username || 'User'}
-            </Text>
-
-            <Text style={styles.userHandle}>
-              @{item.profiles?.username ?? 'unknown'}
-            </Text>
-
-            <View style={styles.topRow}>
-              <View style={styles.foodInfo}>
-                <Text style={styles.dishName}>
-                  {item.dishes?.name ?? 'Unknown dish'}
-                </Text>
-
-                <Text style={styles.restaurantName}>
-                  {item.dishes?.restaurants?.name ?? 'Unknown restaurant'}
-                  {item.dishes?.restaurants?.city
-                    ? ` · ${item.dishes.restaurants.city}`
-                    : ''}
-                </Text>
-              </View>
-
-              <Text style={styles.rating}>{item.rating}★</Text>
+        notifications.map((item) => (
+          <TouchableOpacity
+            key={item.id}
+            style={[
+              styles.notification,
+              !item.isRead &&
+                styles.unreadNotification,
+            ]}
+            activeOpacity={0.7}
+            onPress={() =>
+              openNotification(item)
+            }
+          >
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {item.actorName
+                  .charAt(0)
+                  .toUpperCase()}
+              </Text>
             </View>
 
-            {item.review_text ? (
-              <Text style={styles.review}>{item.review_text}</Text>
-            ) : null}
-          </View>
+            <View style={styles.notificationBody}>
+              <View style={styles.notificationTopRow}>
+                <Text
+                  style={[
+                    styles.notificationText,
+                    !item.isRead &&
+                      styles.unreadText,
+                  ]}
+                >
+                  <Text style={styles.actorName}>
+                    {item.actorName}
+                  </Text>{' '}
+                  {getNotificationText(item)}
+                </Text>
+
+                {!item.isRead ? (
+                  <View style={styles.unreadDot} />
+                ) : null}
+              </View>
+
+              {item.type === 'comment' &&
+              item.commentText ? (
+                <Text
+                  style={styles.commentPreview}
+                  numberOfLines={2}
+                >
+                  &quot;{item.commentText}&quot;
+                </Text>
+              ) : null}
+
+              <Text style={styles.time}>
+                {formatTimeAgo(
+                  item.createdAt
+                )}
+              </Text>
+            </View>
+
+            <Text style={styles.notificationIcon}>
+              {getNotificationIcon(item)}
+            </Text>
+          </TouchableOpacity>
         ))
       )}
     </ScrollView>
@@ -179,6 +335,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#ffffff',
   },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 24,
+  },
+  headerText: {
+    flex: 1,
+    paddingRight: 12,
+  },
   title: {
     fontSize: 30,
     fontWeight: '700',
@@ -187,7 +353,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666666',
     marginTop: 8,
-    marginBottom: 24,
+  },
+  markAll: {
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 10,
   },
   emptyState: {
     marginTop: 20,
@@ -206,46 +376,72 @@ const styles = StyleSheet.create({
     marginTop: 6,
     lineHeight: 21,
   },
-  card: {
-    paddingVertical: 18,
+  notification: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 16,
+    paddingHorizontal: 10,
+    marginHorizontal: -10,
     borderBottomWidth: 1,
     borderBottomColor: '#eeeeee',
   },
-  userName: {
-    fontSize: 16,
+  unreadNotification: {
+    backgroundColor: '#f7f7f7',
+  },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#eeeeee',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  avatarText: {
+    fontSize: 17,
     fontWeight: '700',
   },
-  userHandle: {
-    fontSize: 13,
-    color: '#777777',
-    marginTop: 2,
-    marginBottom: 10,
+  notificationBody: {
+    flex: 1,
+    paddingRight: 10,
   },
-  topRow: {
+  notificationTopRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'flex-start',
   },
-  foodInfo: {
+  notificationText: {
     flex: 1,
-    paddingRight: 16,
-  },
-  dishName: {
-    fontSize: 17,
-    fontWeight: '600',
-  },
-  restaurantName: {
-    fontSize: 14,
-    color: '#666666',
-    marginTop: 3,
-  },
-  rating: {
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  review: {
     fontSize: 15,
     lineHeight: 21,
-    marginTop: 10,
+    color: '#222222',
+  },
+  unreadText: {
+    fontWeight: '500',
+  },
+  actorName: {
+    fontWeight: '700',
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#111111',
+    marginLeft: 8,
+    marginTop: 6,
+  },
+  commentPreview: {
+    fontSize: 14,
+    color: '#666666',
+    marginTop: 5,
+    lineHeight: 19,
+  },
+  time: {
+    fontSize: 12,
+    color: '#999999',
+    marginTop: 6,
+  },
+  notificationIcon: {
+    fontSize: 20,
+    marginTop: 2,
   },
 });

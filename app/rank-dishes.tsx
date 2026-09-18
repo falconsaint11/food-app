@@ -1,13 +1,13 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
@@ -18,6 +18,11 @@ type DishOption = {
   restaurants: {
     name: string;
   } | null;
+};
+
+type SavedRanking = {
+  dish_id: string;
+  rank: number;
 };
 
 export default function RankDishesScreen() {
@@ -46,7 +51,7 @@ export default function RankDishesScreen() {
       return;
     }
 
-    const { data, error } = await supabase
+    const { data: reviewData, error: reviewError } = await supabase
       .from('reviews')
       .select(`
         dish_id,
@@ -60,16 +65,15 @@ export default function RankDishesScreen() {
       `)
       .eq('user_id', user.id);
 
-    setLoading(false);
-
-    if (error) {
-      Alert.alert('Error', error.message);
+    if (reviewError) {
+      setLoading(false);
+      Alert.alert('Error', reviewError.message);
       return;
     }
 
     const uniqueMap = new Map<string, DishOption>();
 
-    for (const row of data ?? []) {
+    for (const row of reviewData ?? []) {
       const dish = row.dishes as unknown as DishOption | null;
 
       if (dish) {
@@ -78,6 +82,23 @@ export default function RankDishesScreen() {
     }
 
     setDishes(Array.from(uniqueMap.values()));
+
+    const { data: rankingData, error: rankingError } = await supabase
+      .from('dish_rankings')
+      .select('dish_id, rank')
+      .eq('user_id', user.id)
+      .order('rank', { ascending: true });
+
+    setLoading(false);
+
+    if (rankingError) {
+      Alert.alert('Ranking error', rankingError.message);
+      return;
+    }
+
+    const savedRankings = (rankingData ?? []) as SavedRanking[];
+
+    setSelected(savedRankings.map((item) => item.dish_id));
   }
 
   function toggleDish(id: string) {
@@ -156,6 +177,7 @@ export default function RankDishesScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Rank Top Dishes</Text>
+
       <Text style={styles.subtitle}>
         Tap dishes in the order you want them ranked.
       </Text>
@@ -190,6 +212,7 @@ export default function RankDishesScreen() {
           >
             <View style={styles.dishInfo}>
               <Text style={styles.dishName}>{dish.name}</Text>
+
               <Text style={styles.restaurantName}>
                 {dish.restaurants?.name ?? 'Unknown restaurant'}
               </Text>
