@@ -948,6 +948,27 @@ export default function LogScreen() {
             {address ? (
               <Text style={styles.selectedLocation}>{address}</Text>
             ) : null}
+
+            <TouchableOpacity
+              style={styles.changeRestaurantButton}
+              onPress={() => {
+                setRestaurantName("");
+                setGooglePlaceId(null);
+                setAddress("");
+                setCity("");
+                setState("");
+                setLatitude(null);
+                setLongitude(null);
+                setRestaurantResults([]);
+                setGoogleResults([]);
+                setDishName("");
+                setSelectedDishId(null);
+                setDishResults([]);
+                resetGoogleSession();
+              }}
+            >
+              <Text style={styles.changeRestaurantText}>Change restaurant</Text>
+            </TouchableOpacity>
           </View>
         ) : creatingNewRestaurant ? (
           <View style={styles.newItemBox}>
@@ -960,29 +981,39 @@ export default function LogScreen() {
           </View>
         ) : null}
 
-        <Text style={styles.label}>City</Text>
+        {!googlePlaceId ? (
+          <>
+            <Text style={styles.label}>City</Text>
 
-        <TextInput
-          style={[styles.input, selectedRestaurantId && styles.inputDisabled]}
-          placeholder="City"
-          placeholderTextColor="#888888"
-          value={city}
-          onChangeText={setCity}
-          editable={!selectedRestaurantId}
-        />
+            <TextInput
+              style={[
+                styles.input,
+                selectedRestaurantId && styles.inputDisabled,
+              ]}
+              placeholder="City"
+              placeholderTextColor="#888888"
+              value={city}
+              onChangeText={setCity}
+              editable={!selectedRestaurantId}
+            />
 
-        <Text style={styles.label}>State</Text>
+            <Text style={styles.label}>State</Text>
 
-        <TextInput
-          style={[styles.input, selectedRestaurantId && styles.inputDisabled]}
-          placeholder="State, e.g. AZ"
-          placeholderTextColor="#888888"
-          value={state}
-          onChangeText={setState}
-          autoCapitalize="characters"
-          maxLength={30}
-          editable={!selectedRestaurantId}
-        />
+            <TextInput
+              style={[
+                styles.input,
+                selectedRestaurantId && styles.inputDisabled,
+              ]}
+              placeholder="State, e.g. AZ"
+              placeholderTextColor="#888888"
+              value={state}
+              onChangeText={setState}
+              autoCapitalize="characters"
+              maxLength={30}
+              editable={!selectedRestaurantId}
+            />
+          </>
+        ) : null}
 
         {!selectedRestaurantId && creatingNewRestaurant ? (
           <View style={styles.locationSection}>
@@ -1612,5 +1643,16 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 16,
     fontWeight: "600",
+  },
+  changeRestaurantButton: {
+    marginTop: 10,
+    alignSelf: "flex-start",
+  },
+
+  changeRestaurantText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#555555",
+    textDecorationLine: "underline",
   },
 });
