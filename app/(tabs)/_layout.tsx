@@ -1,30 +1,20 @@
-import {
-  Tabs,
-  useSegments,
-} from 'expo-router';
-import {
-  useEffect,
-  useState,
-} from 'react';
+import { Tabs, useSegments } from "expo-router";
+import { useEffect, useState } from "react";
 
-import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
-import { getUnreadNotificationCount } from '@/lib/notifications';
+import { HapticTab } from "@/components/haptic-tab";
+import { IconSymbol } from "@/components/ui/icon-symbol";
+import { Colors } from "@/constants/theme";
+import { useColorScheme } from "@/hooks/use-color-scheme";
+import { getUnreadNotificationCount } from "@/lib/notifications";
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
 
-  const themeColors =
-    colorScheme === 'dark'
-      ? Colors.dark
-      : Colors.light;
+  const themeColors = colorScheme === "dark" ? Colors.dark : Colors.light;
 
   const segments = useSegments();
 
-  const [unreadCount, setUnreadCount] =
-    useState(0);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     loadUnreadCount();
@@ -32,15 +22,11 @@ export default function TabLayout() {
 
   async function loadUnreadCount() {
     try {
-      const count =
-        await getUnreadNotificationCount();
+      const count = await getUnreadNotificationCount();
 
       setUnreadCount(count);
     } catch (error) {
-      console.log(
-        'Unread notification error:',
-        error
-      );
+      console.log("Unread notification error:", error);
     }
   }
 
@@ -55,13 +41,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
+          title: "Home",
           tabBarIcon: ({ color }) => (
-            <IconSymbol
-              size={28}
-              name="house.fill"
-              color={color}
-            />
+            <IconSymbol size={28} name="house.fill" color={color} />
           ),
         }}
       />
@@ -69,13 +51,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="discover"
         options={{
-          title: 'Discover',
+          title: "Discover",
           tabBarIcon: ({ color }) => (
-            <IconSymbol
-              size={28}
-              name="magnifyingglass"
-              color={color}
-            />
+            <IconSymbol size={28} name="magnifyingglass" color={color} />
           ),
         }}
       />
@@ -83,13 +61,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="log"
         options={{
-          title: 'Log',
+          title: "Log",
           tabBarIcon: ({ color }) => (
-            <IconSymbol
-              size={30}
-              name="plus.circle.fill"
-              color={color}
-            />
+            <IconSymbol size={30} name="plus.circle.fill" color={color} />
           ),
         }}
       />
@@ -97,21 +71,17 @@ export default function TabLayout() {
       <Tabs.Screen
         name="activity"
         options={{
-          title: 'Activity',
+          title: "Activity",
 
           tabBarBadge:
             unreadCount > 0
               ? unreadCount > 99
-                ? '99+'
+                ? "99+"
                 : unreadCount
               : undefined,
 
           tabBarIcon: ({ color }) => (
-            <IconSymbol
-              size={28}
-              name="heart.fill"
-              color={color}
-            />
+            <IconSymbol size={28} name="heart.fill" color={color} />
           ),
         }}
       />
@@ -119,13 +89,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Profile',
+          title: "Profile",
           tabBarIcon: ({ color }) => (
-            <IconSymbol
-              size={28}
-              name="person.fill"
-              color={color}
-            />
+            <IconSymbol size={28} name="person.fill" color={color} />
           ),
         }}
       />
