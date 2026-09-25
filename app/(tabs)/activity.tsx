@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,10 +18,18 @@ import {
   NotificationItem,
 } from '@/lib/notifications';
 
+import { supabase } from '@/lib/supabase';
+
+type AvatarMap = {
+  [userId: string]: string | null;
+};
+
 export default function ActivityScreen() {
   const [notifications, setNotifications] = useState<
     NotificationItem[]
   >([]);
+
+  const [avatarPaths, setAvatarPaths] = useState<AvatarMap>({});
 
   const [loading, setLoading] = useState(true);
 
@@ -32,6 +41,14 @@ export default function ActivityScreen() {
     }, [])
   );
 
+  function getProfilePhotoUrl(path: string) {
+    const { data } = supabase.storage
+      .from('profile-photos')
+      .getPublicUrl(path);
+
+    return data.publicUrl;
+  }
+
   async function loadActivity() {
     setLoading(true);
 
@@ -39,6 +56,47 @@ export default function ActivityScreen() {
       const data = await getNotifications();
 
       setNotifications(data);
+
+      const actorIds = [
+        ...new Set(
+          data
+            .map((item) => item.actorId)
+            .filter(Boolean)
+        ),
+      ];
+
+      if (actorIds.length === 0) {
+        setAvatarPaths({});
+        return;
+      }
+
+      const {
+        data: profileData,
+        error: profileError,
+      } = await supabase
+        .from('profiles')
+        .select('id, avatar_path')
+        .in('id', actorIds);
+
+      if (profileError) {
+        console.log(
+          'Could not load notification profile photos:',
+          profileError
+        );
+
+        setAvatarPaths({});
+
+        return;
+      }
+
+      const nextAvatarPaths: AvatarMap = {};
+
+      (profileData ?? []).forEach((profile) => {
+        nextAvatarPaths[profile.id] =
+          profile.avatar_path ?? null;
+      });
+
+      setAvatarPaths(nextAvatarPaths);
     } catch (error) {
       const message =
         error instanceof Error
@@ -106,19 +164,15 @@ export default function ActivityScreen() {
   }
 
   async function handleMarkAllRead() {
-    const unreadKeys =
-      notifications
-        .filter(
-          (item) =>
-            !item.isRead
-        )
-        .map(
-          (item) => item.id
-        );
+    const unreadKeys = notifications
+      .filter(
+        (item) => !item.isRead
+      )
+      .map(
+        (item) => item.id
+      );
 
-    if (
-      unreadKeys.length === 0
-    ) {
+    if (unreadKeys.length === 0) {
       return;
     }
 
@@ -158,42 +212,37 @@ export default function ActivityScreen() {
   ) {
     const now = Date.now();
 
-    const then =
-      new Date(
-        date
-      ).getTime();
+    const then = new Date(
+      date
+    ).getTime();
 
-    const seconds =
-      Math.floor(
-        (now - then) / 1000
-      );
+    const seconds = Math.floor(
+      (now - then) / 1000
+    );
 
     if (seconds < 60) {
       return 'Just now';
     }
 
-    const minutes =
-      Math.floor(
-        seconds / 60
-      );
+    const minutes = Math.floor(
+      seconds / 60
+    );
 
     if (minutes < 60) {
       return `${minutes}m`;
     }
 
-    const hours =
-      Math.floor(
-        minutes / 60
-      );
+    const hours = Math.floor(
+      minutes / 60
+    );
 
     if (hours < 24) {
       return `${hours}h`;
     }
 
-    const days =
-      Math.floor(
-        hours / 24
-      );
+    const days = Math.floor(
+      hours / 24
+    );
 
     if (days < 7) {
       return `${days}d`;
@@ -252,6 +301,9 @@ export default function ActivityScreen() {
   function renderNotification(
     item: NotificationItem
   ) {
+    const avatarPath =
+      avatarPaths[item.actorId];
+
     return (
       <TouchableOpacity
         key={item.id}
@@ -267,21 +319,35 @@ export default function ActivityScreen() {
           )
         }
       >
-        <View
-          style={
-            styles.avatar
-          }
-        >
-          <Text
+        {avatarPath ? (
+          <Image
+            source={{
+              uri: getProfilePhotoUrl(
+                avatarPath
+              ),
+            }}
             style={
-              styles.avatarText
+              styles.avatarImage
+            }
+            resizeMode="cover"
+          />
+        ) : (
+          <View
+            style={
+              styles.avatar
             }
           >
-            {item.actorName
-              .charAt(0)
-              .toUpperCase()}
-          </Text>
-        </View>
+            <Text
+              style={
+                styles.avatarText
+              }
+            >
+              {item.actorName
+                .charAt(0)
+                .toUpperCase()}
+            </Text>
+          </View>
+        )}
 
         <View
           style={
@@ -577,257 +643,235 @@ export default function ActivityScreen() {
   );
 }
 
-const styles =
-  StyleSheet.create({
-    container: {
-      flexGrow: 1,
-      padding: 24,
-      paddingTop: 70,
-      paddingBottom: 50,
-      backgroundColor:
-        '#ffffff',
-    },
+const styles = StyleSheet.create({
+  container: {
+    flexGrow: 1,
+    padding: 24,
+    paddingTop: 70,
+    paddingBottom: 50,
+    backgroundColor: '#ffffff',
+  },
 
-    centered: {
-      flex: 1,
-      justifyContent:
-        'center',
-      alignItems:
-        'center',
-      backgroundColor:
-        '#ffffff',
-    },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+  },
 
-    headerRow: {
-      flexDirection: 'row',
-      justifyContent:
-        'space-between',
-      alignItems:
-        'flex-start',
-      marginBottom: 26,
-    },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 26,
+  },
 
-    headerText: {
-      flex: 1,
-      paddingRight: 14,
-    },
+  headerText: {
+    flex: 1,
+    paddingRight: 14,
+  },
 
-    title: {
-      fontSize: 30,
-      fontWeight: '700',
-    },
+  title: {
+    fontSize: 30,
+    fontWeight: '700',
+  },
 
-    subtitle: {
-      fontSize: 14,
-      color: '#777777',
-      marginTop: 5,
-    },
+  subtitle: {
+    fontSize: 14,
+    color: '#777777',
+    marginTop: 5,
+  },
 
-    markAllButton: {
-      borderWidth: 1,
-      borderColor:
-        '#dddddd',
-      borderRadius: 9,
-      paddingHorizontal: 11,
-      paddingVertical: 8,
-      marginTop: 2,
-    },
+  markAllButton: {
+    borderWidth: 1,
+    borderColor: '#dddddd',
+    borderRadius: 9,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    marginTop: 2,
+  },
 
-    markAll: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: '#333333',
-    },
+  markAll: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#333333',
+  },
 
-    section: {
-      marginTop: 2,
-    },
+  section: {
+    marginTop: 2,
+  },
 
-    olderSection: {
-      marginTop: 30,
-    },
+  olderSection: {
+    marginTop: 30,
+  },
 
-    sectionHeader: {
-      flexDirection: 'row',
-      alignItems:
-        'center',
-      marginBottom: 6,
-    },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
 
-    sectionTitle: {
-      fontSize: 18,
-      fontWeight: '700',
-    },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
 
-    countBadge: {
-      minWidth: 22,
-      height: 22,
-      paddingHorizontal: 6,
-      borderRadius: 11,
-      backgroundColor:
-        '#111111',
-      alignItems:
-        'center',
-      justifyContent:
-        'center',
-      marginLeft: 8,
-    },
+  countBadge: {
+    minWidth: 22,
+    height: 22,
+    paddingHorizontal: 6,
+    borderRadius: 11,
+    backgroundColor: '#111111',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
 
-    countBadgeText: {
-      color: '#ffffff',
-      fontSize: 11,
-      fontWeight: '700',
-    },
+  countBadgeText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
 
-    emptyState: {
-      marginTop: 16,
-      alignItems:
-        'center',
-      paddingVertical: 34,
-      paddingHorizontal: 24,
-      borderWidth: 1,
-      borderColor:
-        '#eeeeee',
-      borderRadius: 16,
-    },
+  emptyState: {
+    marginTop: 16,
+    alignItems: 'center',
+    paddingVertical: 34,
+    paddingHorizontal: 24,
+    borderWidth: 1,
+    borderColor: '#eeeeee',
+    borderRadius: 16,
+  },
 
-    emptyIcon: {
-      width: 54,
-      height: 54,
-      borderRadius: 27,
-      backgroundColor:
-        '#f3f3f3',
-      alignItems:
-        'center',
-      justifyContent:
-        'center',
-      marginBottom: 14,
-    },
+  emptyIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: '#f3f3f3',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
 
-    emptyIconText: {
-      fontSize: 23,
-    },
+  emptyIconText: {
+    fontSize: 23,
+  },
 
-    emptyTitle: {
-      fontSize: 17,
-      fontWeight: '700',
-    },
+  emptyTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+  },
 
-    emptyText: {
-      fontSize: 14,
-      color: '#777777',
-      marginTop: 6,
-      lineHeight: 20,
-      textAlign:
-        'center',
-      maxWidth: 300,
-    },
+  emptyText: {
+    fontSize: 14,
+    color: '#777777',
+    marginTop: 6,
+    lineHeight: 20,
+    textAlign: 'center',
+    maxWidth: 300,
+  },
 
-    notification: {
-      flexDirection: 'row',
-      alignItems:
-        'flex-start',
-      paddingVertical: 15,
-      paddingHorizontal: 12,
-      marginTop: 6,
-      borderWidth: 1,
-      borderColor:
-        '#eeeeee',
-      borderRadius: 14,
-      backgroundColor:
-        '#ffffff',
-    },
+  notification: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 15,
+    paddingHorizontal: 12,
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: '#eeeeee',
+    borderRadius: 14,
+    backgroundColor: '#ffffff',
+  },
 
-    unreadNotification: {
-      backgroundColor:
-        '#f7f7f7',
-      borderColor:
-        '#dddddd',
-    },
+  unreadNotification: {
+    backgroundColor: '#f7f7f7',
+    borderColor: '#dddddd',
+  },
 
-    avatar: {
-      width: 46,
-      height: 46,
-      borderRadius: 23,
-      backgroundColor:
-        '#eeeeee',
-      alignItems:
-        'center',
-      justifyContent:
-        'center',
-      marginRight: 12,
-    },
+  avatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#eeeeee',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
 
-    avatarText: {
-      fontSize: 17,
-      fontWeight: '700',
-    },
+  avatarImage: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#eeeeee',
+    marginRight: 12,
+  },
 
-    notificationBody: {
-      flex: 1,
-      paddingRight: 8,
-    },
+  avatarText: {
+    fontSize: 17,
+    fontWeight: '700',
+  },
 
-    notificationTopRow: {
-      flexDirection: 'row',
-      alignItems:
-        'flex-start',
-    },
+  notificationBody: {
+    flex: 1,
+    paddingRight: 8,
+  },
 
-    notificationText: {
-      flex: 1,
-      fontSize: 14,
-      lineHeight: 20,
-      color: '#333333',
-    },
+  notificationTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
 
-    unreadText: {
-      color: '#111111',
-    },
+  notificationText: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#333333',
+  },
 
-    actorName: {
-      fontWeight: '700',
-    },
+  unreadText: {
+    color: '#111111',
+  },
 
-    unreadDot: {
-      width: 8,
-      height: 8,
-      borderRadius: 4,
-      backgroundColor:
-        '#111111',
-      marginLeft: 8,
-      marginTop: 6,
-    },
+  actorName: {
+    fontWeight: '700',
+  },
 
-    commentPreviewBox: {
-      marginTop: 7,
-      backgroundColor:
-        '#ffffff',
-      borderRadius: 8,
-      paddingHorizontal: 10,
-      paddingVertical: 7,
-    },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#111111',
+    marginLeft: 8,
+    marginTop: 6,
+  },
 
-    commentPreview: {
-      fontSize: 13,
-      color: '#666666',
-      lineHeight: 18,
-    },
+  commentPreviewBox: {
+    marginTop: 7,
+    backgroundColor: '#ffffff',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
 
-    time: {
-      fontSize: 11,
-      color: '#999999',
-      marginTop: 7,
-    },
+  commentPreview: {
+    fontSize: 13,
+    color: '#666666',
+    lineHeight: 18,
+  },
 
-    iconArea: {
-      width: 30,
-      alignItems:
-        'center',
-      paddingTop: 1,
-    },
+  time: {
+    fontSize: 11,
+    color: '#999999',
+    marginTop: 7,
+  },
 
-    notificationIcon: {
-      fontSize: 19,
-    },
-  });
+  iconArea: {
+    width: 30,
+    alignItems: 'center',
+    paddingTop: 1,
+  },
+
+  notificationIcon: {
+    fontSize: 19,
+  },
+});

@@ -22,6 +22,7 @@ type PublicProfile = {
   username: string;
   display_name: string | null;
   bio: string | null;
+  avatar_path: string | null;
 };
 
 type RankedDish = {
@@ -65,49 +66,28 @@ type DiaryEntry = {
 };
 
 export default function UserProfileScreen() {
-  const { id } = useLocalSearchParams<{
-    id: string;
-  }>();
+  const { id } = useLocalSearchParams<{ id: string }>();
 
-  const [profile, setProfile] =
-    useState<PublicProfile | null>(null);
+  const [profile, setProfile] = useState<PublicProfile | null>(null);
+  const [topDishes, setTopDishes] = useState<RankedDish[]>([]);
+  const [topRestaurants, setTopRestaurants] = useState<
+    RankedRestaurant[]
+  >([]);
+  const [diary, setDiary] = useState<DiaryEntry[]>([]);
 
-  const [topDishes, setTopDishes] =
-    useState<RankedDish[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isFollowing, setIsFollowing] = useState(false);
 
-  const [topRestaurants, setTopRestaurants] =
-    useState<RankedRestaurant[]>([]);
+  const [followerCount, setFollowerCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
 
-  const [diary, setDiary] =
-    useState<DiaryEntry[]>([]);
+  const [reviewCount, setReviewCount] = useState(0);
+  const [dishCount, setDishCount] = useState(0);
+  const [restaurantCount, setRestaurantCount] = useState(0);
 
-  const [loading, setLoading] =
-    useState(true);
-
-  const [isFollowing, setIsFollowing] =
-    useState(false);
-
-  const [followerCount, setFollowerCount] =
-    useState(0);
-
-  const [followingCount, setFollowingCount] =
-    useState(0);
-
-  const [reviewCount, setReviewCount] =
-    useState(0);
-
-  const [dishCount, setDishCount] =
-    useState(0);
-
-  const [
-    restaurantCount,
-    setRestaurantCount,
-  ] = useState(0);
-
-  const [
-    currentUserId,
-    setCurrentUserId,
-  ] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(
+    null
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -128,7 +108,7 @@ export default function UserProfileScreen() {
     } = await supabase
       .from('profiles')
       .select(
-        'id, username, display_name, bio'
+        'id, username, display_name, bio, avatar_path'
       )
       .eq('id', id)
       .maybeSingle();
@@ -154,35 +134,21 @@ export default function UserProfileScreen() {
 
     const {
       data: { user },
-    } =
-      await supabase.auth.getUser();
+    } = await supabase.auth.getUser();
 
-    setCurrentUserId(
-      user?.id ?? null
-    );
+    setCurrentUserId(user?.id ?? null);
 
-    if (
-      user &&
-      user.id !== id
-    ) {
+    if (user && user.id !== id) {
       const {
         data: followData,
       } = await supabase
         .from('follows')
         .select('id')
-        .eq(
-          'follower_id',
-          user.id
-        )
-        .eq(
-          'following_id',
-          id
-        )
+        .eq('follower_id', user.id)
+        .eq('following_id', id)
         .maybeSingle();
 
-      setIsFollowing(
-        !!followData
-      );
+      setIsFollowing(!!followData);
     } else {
       setIsFollowing(false);
     }
@@ -195,14 +161,9 @@ export default function UserProfileScreen() {
         count: 'exact',
         head: true,
       })
-      .eq(
-        'following_id',
-        id
-      );
+      .eq('following_id', id);
 
-    setFollowerCount(
-      followers ?? 0
-    );
+    setFollowerCount(followers ?? 0);
 
     const {
       count: following,
@@ -212,14 +173,9 @@ export default function UserProfileScreen() {
         count: 'exact',
         head: true,
       })
-      .eq(
-        'follower_id',
-        id
-      );
+      .eq('follower_id', id);
 
-    setFollowingCount(
-      following ?? 0
-    );
+    setFollowingCount(following ?? 0);
 
     const {
       data: dishData,
@@ -238,10 +194,7 @@ export default function UserProfileScreen() {
           )
         )
       `)
-      .eq(
-        'user_id',
-        id
-      )
+      .eq('user_id', id)
       .order('rank', {
         ascending: true,
       });
@@ -258,17 +211,14 @@ export default function UserProfileScreen() {
     }
 
     setTopDishes(
-      (dishData ?? []) as unknown as
-        RankedDish[]
+      (dishData ?? []) as unknown as RankedDish[]
     );
 
     const {
       data: restaurantData,
       error: restaurantError,
     } = await supabase
-      .from(
-        'restaurant_rankings'
-      )
+      .from('restaurant_rankings')
       .select(`
         id,
         rank,
@@ -278,10 +228,7 @@ export default function UserProfileScreen() {
           city
         )
       `)
-      .eq(
-        'user_id',
-        id
-      )
+      .eq('user_id', id)
       .order('rank', {
         ascending: true,
       });
@@ -298,9 +245,7 @@ export default function UserProfileScreen() {
     }
 
     setTopRestaurants(
-      (restaurantData ??
-        []) as unknown as
-        RankedRestaurant[]
+      (restaurantData ?? []) as unknown as RankedRestaurant[]
     );
 
     const {
@@ -324,10 +269,7 @@ export default function UserProfileScreen() {
           )
         )
       `)
-      .eq(
-        'user_id',
-        id
-      )
+      .eq('user_id', id)
       .order('date_eaten', {
         ascending: false,
       })
@@ -346,43 +288,28 @@ export default function UserProfileScreen() {
       return;
     }
 
-    const entries =
-      (diaryData ??
-        []) as unknown as
-        DiaryEntry[];
+    const entries = (diaryData ?? []) as unknown as DiaryEntry[];
 
-    setDiary(
-      entries.slice(0, 3)
+    setDiary(entries.slice(0, 3));
+
+    setReviewCount(entries.length);
+
+    const uniqueDishIds = new Set(
+      entries
+        .map((entry) => entry.dishes?.id)
+        .filter(Boolean)
     );
 
-    setReviewCount(
-      entries.length
+    setDishCount(uniqueDishIds.size);
+
+    const uniqueRestaurantIds = new Set(
+      entries
+        .map(
+          (entry) =>
+            entry.dishes?.restaurants?.id
+        )
+        .filter(Boolean)
     );
-
-    const uniqueDishIds =
-      new Set(
-        entries
-          .map(
-            (entry) =>
-              entry.dishes?.id
-          )
-          .filter(Boolean)
-      );
-
-    setDishCount(
-      uniqueDishIds.size
-    );
-
-    const uniqueRestaurantIds =
-      new Set(
-        entries
-          .map(
-            (entry) =>
-              entry.dishes
-                ?.restaurants?.id
-          )
-          .filter(Boolean)
-      );
 
     setRestaurantCount(
       uniqueRestaurantIds.size
@@ -395,8 +322,7 @@ export default function UserProfileScreen() {
     const {
       data: { user },
       error: userError,
-    } =
-      await supabase.auth.getUser();
+    } = await supabase.auth.getUser();
 
     if (
       userError ||
@@ -416,18 +342,11 @@ export default function UserProfileScreen() {
     }
 
     if (isFollowing) {
-      const { error } =
-        await supabase
-          .from('follows')
-          .delete()
-          .eq(
-            'follower_id',
-            user.id
-          )
-          .eq(
-            'following_id',
-            id
-          );
+      const { error } = await supabase
+        .from('follows')
+        .delete()
+        .eq('follower_id', user.id)
+        .eq('following_id', id);
 
       if (error) {
         Alert.alert(
@@ -440,23 +359,16 @@ export default function UserProfileScreen() {
 
       setIsFollowing(false);
 
-      setFollowerCount(
-        (current) =>
-          Math.max(
-            0,
-            current - 1
-          )
+      setFollowerCount((current) =>
+        Math.max(0, current - 1)
       );
     } else {
-      const { error } =
-        await supabase
-          .from('follows')
-          .insert({
-            follower_id:
-              user.id,
-            following_id:
-              id,
-          });
+      const { error } = await supabase
+        .from('follows')
+        .insert({
+          follower_id: user.id,
+          following_id: id,
+        });
 
       if (error) {
         Alert.alert(
@@ -470,8 +382,7 @@ export default function UserProfileScreen() {
       setIsFollowing(true);
 
       setFollowerCount(
-        (current) =>
-          current + 1
+        (current) => current + 1
       );
     }
   }
@@ -481,9 +392,18 @@ export default function UserProfileScreen() {
   ) {
     const { data } =
       supabase.storage
-        .from(
-          'review-photos'
-        )
+        .from('review-photos')
+        .getPublicUrl(path);
+
+    return data.publicUrl;
+  }
+
+  function getProfilePhotoUrl(
+    path: string
+  ) {
+    const { data } =
+      supabase.storage
+        .from('profile-photos')
         .getPublicUrl(path);
 
     return data.publicUrl;
@@ -492,10 +412,9 @@ export default function UserProfileScreen() {
   function formatDate(
     date: string
   ) {
-    const parsedDate =
-      new Date(
-        `${date}T00:00:00`
-      );
+    const parsedDate = new Date(
+      `${date}T00:00:00`
+    );
 
     return parsedDate.toLocaleDateString(
       undefined,
@@ -508,11 +427,7 @@ export default function UserProfileScreen() {
 
   if (loading) {
     return (
-      <View
-        style={
-          styles.centered
-        }
-      >
+      <View style={styles.centered}>
         <ActivityIndicator
           size="large"
         />
@@ -522,11 +437,7 @@ export default function UserProfileScreen() {
 
   if (!profile) {
     return (
-      <View
-        style={
-          styles.centered
-        }
-      >
+      <View style={styles.centered}>
         <Text>
           Profile not found.
         </Text>
@@ -545,24 +456,38 @@ export default function UserProfileScreen() {
           styles.profileHeader
         }
       >
-        <View
-          style={
-            styles.avatarPlaceholder
-          }
-        >
-          <Text
+        {profile.avatar_path ? (
+          <Image
+            source={{
+              uri: getProfilePhotoUrl(
+                profile.avatar_path
+              ),
+            }}
             style={
-              styles.avatarText
+              styles.profileAvatar
+            }
+            resizeMode="cover"
+          />
+        ) : (
+          <View
+            style={
+              styles.avatarPlaceholder
             }
           >
-            {(
-              profile.display_name ||
-              profile.username
-            )
-              .charAt(0)
-              .toUpperCase()}
-          </Text>
-        </View>
+            <Text
+              style={
+                styles.avatarText
+              }
+            >
+              {(
+                profile.display_name ||
+                profile.username
+              )
+                .charAt(0)
+                .toUpperCase()}
+            </Text>
+          </View>
+        )}
 
         <Text
           style={
@@ -574,9 +499,7 @@ export default function UserProfileScreen() {
         </Text>
 
         <Text
-          style={
-            styles.username
-          }
+          style={styles.username}
         >
           @{profile.username}
         </Text>
@@ -616,13 +539,9 @@ export default function UserProfileScreen() {
       </View>
 
       <View
-        style={
-          styles.statsCard
-        }
+        style={styles.statsCard}
       >
-        <View
-          style={styles.stat}
-        >
+        <View style={styles.stat}>
           <Text
             style={
               styles.statNumber
@@ -646,9 +565,7 @@ export default function UserProfileScreen() {
           }
         />
 
-        <View
-          style={styles.stat}
-        >
+        <View style={styles.stat}>
           <Text
             style={
               styles.statNumber
@@ -672,9 +589,7 @@ export default function UserProfileScreen() {
           }
         />
 
-        <View
-          style={styles.stat}
-        >
+        <View style={styles.stat}>
           <Text
             style={
               styles.statNumber
@@ -764,9 +679,7 @@ export default function UserProfileScreen() {
       </View>
 
       <View
-        style={
-          styles.section
-        }
+        style={styles.section}
       >
         <Text
           style={
@@ -801,19 +714,14 @@ export default function UserProfileScreen() {
               .slice(0, 4)
               .map((item) => (
                 <TouchableOpacity
-                  key={
-                    item.id
-                  }
+                  key={item.id}
                   style={
                     styles.featureCard
                   }
-                  activeOpacity={
-                    0.7
-                  }
+                  activeOpacity={0.7}
                   onPress={() => {
                     if (
-                      !item.dishes
-                        ?.id
+                      !item.dishes?.id
                     ) {
                       return;
                     }
@@ -823,8 +731,7 @@ export default function UserProfileScreen() {
                         '/dish/[id]',
                       params: {
                         id: item
-                          .dishes
-                          .id,
+                          .dishes.id,
                       },
                     });
                   }}
@@ -876,9 +783,7 @@ export default function UserProfileScreen() {
       </View>
 
       <View
-        style={
-          styles.section
-        }
+        style={styles.section}
       >
         <Text
           style={
@@ -913,15 +818,11 @@ export default function UserProfileScreen() {
               .slice(0, 4)
               .map((item) => (
                 <TouchableOpacity
-                  key={
-                    item.id
-                  }
+                  key={item.id}
                   style={
                     styles.featureCard
                   }
-                  activeOpacity={
-                    0.7
-                  }
+                  activeOpacity={0.7}
                   onPress={() => {
                     if (
                       !item
@@ -990,9 +891,7 @@ export default function UserProfileScreen() {
       </View>
 
       <View
-        style={
-          styles.section
-        }
+        style={styles.section}
       >
         <Text
           style={
@@ -1017,156 +916,149 @@ export default function UserProfileScreen() {
             </Text>
           </View>
         ) : (
-          diary.map(
-            (entry) => {
-              const photoUrl =
-                entry.photo_path
-                  ? getPhotoUrl(
-                      entry.photo_path
-                    )
-                  : null;
+          diary.map((entry) => {
+            const photoUrl =
+              entry.photo_path
+                ? getPhotoUrl(
+                    entry.photo_path
+                  )
+                : null;
 
-              return (
-                <TouchableOpacity
-                  key={entry.id}
+            return (
+              <TouchableOpacity
+                key={entry.id}
+                style={
+                  styles.diaryCard
+                }
+                activeOpacity={0.7}
+                onPress={() =>
+                  router.push({
+                    pathname:
+                      '/review/[id]',
+                    params: {
+                      id: entry.id,
+                    },
+                  })
+                }
+              >
+                <View
                   style={
-                    styles.diaryCard
-                  }
-                  activeOpacity={
-                    0.7
-                  }
-                  onPress={() =>
-                    router.push({
-                      pathname:
-                        '/review/[id]',
-                      params: {
-                        id: entry.id,
-                      },
-                    })
+                    styles.diaryContentRow
                   }
                 >
+                  {photoUrl ? (
+                    <Image
+                      source={{
+                        uri: photoUrl,
+                      }}
+                      style={
+                        styles.diaryThumbnail
+                      }
+                      resizeMode="cover"
+                    />
+                  ) : null}
+
                   <View
                     style={
-                      styles.diaryContentRow
+                      styles.diaryMainContent
                     }
                   >
-                    {photoUrl ? (
-                      <Image
-                        source={{
-                          uri: photoUrl,
-                        }}
-                        style={
-                          styles.diaryThumbnail
-                        }
-                        resizeMode="cover"
-                      />
-                    ) : null}
-
                     <View
                       style={
-                        styles.diaryMainContent
+                        styles.diaryTopRow
                       }
                     >
                       <View
                         style={
-                          styles.diaryTopRow
+                          styles.diaryInfo
                         }
                       >
-                        <View
-                          style={
-                            styles.diaryInfo
-                          }
-                        >
-                          <Text
-                            style={
-                              styles.dishName
-                            }
-                          >
-                            {entry
-                              .dishes
-                              ?.name ??
-                              'Unknown dish'}
-                          </Text>
-
-                          <Text
-                            style={
-                              styles.restaurantName
-                            }
-                            numberOfLines={
-                              1
-                            }
-                          >
-                            {entry
-                              .dishes
-                              ?.restaurants
-                              ?.name ??
-                              'Unknown restaurant'}
-
-                            {entry
-                              .dishes
-                              ?.restaurants
-                              ?.city
-                              ? ` · ${entry.dishes.restaurants.city}`
-                              : ''}
-                          </Text>
-                        </View>
-
-                        <View
-                          style={
-                            styles.diaryRight
-                          }
-                        >
-                          <Text
-                            style={
-                              styles.rating
-                            }
-                          >
-                            {
-                              entry.rating
-                            }
-                            ★
-                          </Text>
-
-                          <Text
-                            style={
-                              styles.dateText
-                            }
-                          >
-                            {formatDate(
-                              entry.date_eaten
-                            )}
-                          </Text>
-                        </View>
-                      </View>
-
-                      {entry.review_text ? (
                         <Text
                           style={
-                            styles.reviewText
-                          }
-                          numberOfLines={
-                            2
+                            styles.dishName
                           }
                         >
-                          {
-                            entry.review_text
-                          }
+                          {entry
+                            .dishes
+                            ?.name ??
+                            'Unknown dish'}
                         </Text>
-                      ) : null}
 
-                      <Text
+                        <Text
+                          style={
+                            styles.restaurantName
+                          }
+                          numberOfLines={
+                            1
+                          }
+                        >
+                          {entry
+                            .dishes
+                            ?.restaurants
+                            ?.name ??
+                            'Unknown restaurant'}
+
+                          {entry
+                            .dishes
+                            ?.restaurants
+                            ?.city
+                            ? ` · ${entry.dishes.restaurants.city}`
+                            : ''}
+                        </Text>
+                      </View>
+
+                      <View
                         style={
-                          styles.viewReview
+                          styles.diaryRight
                         }
                       >
-                        View review
-                      </Text>
+                        <Text
+                          style={
+                            styles.rating
+                          }
+                        >
+                          {entry.rating}★
+                        </Text>
+
+                        <Text
+                          style={
+                            styles.dateText
+                          }
+                        >
+                          {formatDate(
+                            entry.date_eaten
+                          )}
+                        </Text>
+                      </View>
                     </View>
+
+                    {entry.review_text ? (
+                      <Text
+                        style={
+                          styles.reviewText
+                        }
+                        numberOfLines={
+                          2
+                        }
+                      >
+                        {
+                          entry.review_text
+                        }
+                      </Text>
+                    ) : null}
+
+                    <Text
+                      style={
+                        styles.viewReview
+                      }
+                    >
+                      View review
+                    </Text>
                   </View>
-                </TouchableOpacity>
-              );
-            }
-          )
+                </View>
+              </TouchableOpacity>
+            );
+          })
         )}
       </View>
     </ScrollView>
@@ -1197,6 +1089,14 @@ const styles =
     profileHeader: {
       alignItems:
         'center',
+    },
+
+    profileAvatar: {
+      width: 92,
+      height: 92,
+      borderRadius: 46,
+      backgroundColor:
+        '#eeeeee',
     },
 
     avatarPlaceholder: {

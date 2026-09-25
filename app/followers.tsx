@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,6 +17,7 @@ type Profile = {
   id: string;
   username: string;
   display_name: string | null;
+  avatar_path: string | null;
 };
 
 export default function FollowersScreen() {
@@ -27,6 +29,14 @@ export default function FollowersScreen() {
   useEffect(() => {
     loadFollowers();
   }, [userId]);
+
+  function getProfilePhotoUrl(path: string) {
+    const { data } = supabase.storage
+      .from('profile-photos')
+      .getPublicUrl(path);
+
+    return data.publicUrl;
+  }
 
   async function loadFollowers() {
     if (!userId) {
@@ -43,7 +53,12 @@ export default function FollowersScreen() {
 
     if (followError) {
       setLoading(false);
-      Alert.alert('Followers error', followError.message);
+
+      Alert.alert(
+        'Followers error',
+        followError.message
+      );
+
       return;
     }
 
@@ -57,19 +72,30 @@ export default function FollowersScreen() {
       return;
     }
 
-    const { data: profileData, error: profileError } = await supabase
+    const {
+      data: profileData,
+      error: profileError,
+    } = await supabase
       .from('profiles')
-      .select('id, username, display_name')
+      .select(
+        'id, username, display_name, avatar_path'
+      )
       .in('id', followerIds);
 
     setLoading(false);
 
     if (profileError) {
-      Alert.alert('Profile error', profileError.message);
+      Alert.alert(
+        'Profile error',
+        profileError.message
+      );
+
       return;
     }
 
-    const sortedProfiles = [...(profileData ?? [])].sort((a, b) => {
+    const sortedProfiles = [
+      ...(profileData ?? []),
+    ].sort((a, b) => {
       const aName = (
         a.display_name ||
         a.username
@@ -80,7 +106,9 @@ export default function FollowersScreen() {
         b.username
       ).toLowerCase();
 
-      return aName.localeCompare(bName);
+      return aName.localeCompare(
+        bName
+      );
     });
 
     setProfiles(sortedProfiles);
@@ -88,149 +116,262 @@ export default function FollowersScreen() {
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" />
+      <View
+        style={styles.centered}
+      >
+        <ActivityIndicator
+          size="large"
+        />
       </View>
     );
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Followers</Text>
+    <ScrollView
+      contentContainerStyle={
+        styles.container
+      }
+    >
+      <View
+        style={styles.header}
+      >
+        <Text
+          style={styles.title}
+        >
+          Followers
+        </Text>
 
-        <Text style={styles.subtitle}>
+        <Text
+          style={styles.subtitle}
+        >
           {profiles.length}{' '}
-          {profiles.length === 1 ? 'person' : 'people'}
+          {profiles.length === 1
+            ? 'person'
+            : 'people'}
         </Text>
       </View>
 
       {profiles.length === 0 ? (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>No followers yet</Text>
+        <View
+          style={styles.emptyCard}
+        >
+          <Text
+            style={
+              styles.emptyTitle
+            }
+          >
+            No followers yet
+          </Text>
 
-          <Text style={styles.emptyText}>
-            People who follow this profile will appear here.
+          <Text
+            style={
+              styles.emptyText
+            }
+          >
+            People who follow this
+            profile will appear here.
           </Text>
         </View>
       ) : (
-        profiles.map((profile) => (
-          <TouchableOpacity
-            key={profile.id}
-            style={styles.userRow}
-            activeOpacity={0.7}
-            onPress={() =>
-              router.push({
-                pathname: '/user/[id]',
-                params: {
-                  id: profile.id,
-                },
-              })
-            }
-          >
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {(profile.display_name || profile.username)
-                  .charAt(0)
-                  .toUpperCase()}
-              </Text>
-            </View>
+        profiles.map(
+          (profile) => (
+            <TouchableOpacity
+              key={profile.id}
+              style={
+                styles.userRow
+              }
+              activeOpacity={0.7}
+              onPress={() =>
+                router.push({
+                  pathname:
+                    '/user/[id]',
+                  params: {
+                    id: profile.id,
+                  },
+                })
+              }
+            >
+              {profile.avatar_path ? (
+                <Image
+                  source={{
+                    uri: getProfilePhotoUrl(
+                      profile.avatar_path
+                    ),
+                  }}
+                  style={
+                    styles.avatarImage
+                  }
+                  resizeMode="cover"
+                />
+              ) : (
+                <View
+                  style={
+                    styles.avatar
+                  }
+                >
+                  <Text
+                    style={
+                      styles.avatarText
+                    }
+                  >
+                    {(
+                      profile.display_name ||
+                      profile.username
+                    )
+                      .charAt(0)
+                      .toUpperCase()}
+                  </Text>
+                </View>
+              )}
 
-            <View style={styles.userInfo}>
-              <Text style={styles.displayName}>
-                {profile.display_name || profile.username}
-              </Text>
+              <View
+                style={
+                  styles.userInfo
+                }
+              >
+                <Text
+                  style={
+                    styles.displayName
+                  }
+                >
+                  {profile.display_name ||
+                    profile.username}
+                </Text>
 
-              <Text style={styles.username}>
-                @{profile.username}
-              </Text>
-            </View>
+                <Text
+                  style={
+                    styles.username
+                  }
+                >
+                  @{profile.username}
+                </Text>
+              </View>
 
-            <Text style={styles.chevron}>›</Text>
-          </TouchableOpacity>
-        ))
+              <Text
+                style={
+                  styles.chevron
+                }
+              >
+                ›
+              </Text>
+            </TouchableOpacity>
+          )
+        )
       )}
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    padding: 24,
-    paddingTop: 70,
-    paddingBottom: 50,
-    backgroundColor: '#ffffff',
-  },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#ffffff',
-  },
-  header: {
-    marginBottom: 18,
-  },
-  title: {
-    fontSize: 30,
-    fontWeight: '700',
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#777777',
-    marginTop: 4,
-  },
-  emptyCard: {
-    borderWidth: 1,
-    borderColor: '#eeeeee',
-    borderRadius: 14,
-    padding: 18,
-  },
-  emptyTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  emptyText: {
-    fontSize: 13,
-    color: '#777777',
-    lineHeight: 18,
-    marginTop: 4,
-  },
-  userRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#eeeeee',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
-  avatarText: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  userInfo: {
-    flex: 1,
-  },
-  displayName: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  username: {
-    fontSize: 13,
-    color: '#777777',
-    marginTop: 3,
-  },
-  chevron: {
-    fontSize: 24,
-    color: '#aaaaaa',
-    marginLeft: 12,
-  },
-});
+const styles =
+  StyleSheet.create({
+    container: {
+      flexGrow: 1,
+      padding: 24,
+      paddingTop: 70,
+      paddingBottom: 50,
+      backgroundColor:
+        '#ffffff',
+    },
+
+    centered: {
+      flex: 1,
+      justifyContent:
+        'center',
+      alignItems:
+        'center',
+      backgroundColor:
+        '#ffffff',
+    },
+
+    header: {
+      marginBottom: 18,
+    },
+
+    title: {
+      fontSize: 30,
+      fontWeight: '700',
+    },
+
+    subtitle: {
+      fontSize: 14,
+      color: '#777777',
+      marginTop: 4,
+    },
+
+    emptyCard: {
+      borderWidth: 1,
+      borderColor:
+        '#eeeeee',
+      borderRadius: 14,
+      padding: 18,
+    },
+
+    emptyTitle: {
+      fontSize: 15,
+      fontWeight: '700',
+    },
+
+    emptyText: {
+      fontSize: 13,
+      color: '#777777',
+      lineHeight: 18,
+      marginTop: 4,
+    },
+
+    userRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor:
+        '#eeeeee',
+    },
+
+    avatar: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor:
+        '#eeeeee',
+      alignItems:
+        'center',
+      justifyContent:
+        'center',
+      marginRight: 14,
+    },
+
+    avatarImage: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor:
+        '#eeeeee',
+      marginRight: 14,
+    },
+
+    avatarText: {
+      fontSize: 18,
+      fontWeight: '700',
+    },
+
+    userInfo: {
+      flex: 1,
+    },
+
+    displayName: {
+      fontSize: 16,
+      fontWeight: '700',
+    },
+
+    username: {
+      fontSize: 13,
+      color: '#777777',
+      marginTop: 3,
+    },
+
+    chevron: {
+      fontSize: 24,
+      color: '#aaaaaa',
+      marginLeft: 12,
+    },
+  });
