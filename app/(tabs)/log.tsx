@@ -1,7 +1,7 @@
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   ActivityIndicator,
@@ -26,11 +26,40 @@ type RestaurantResult = {
   state: string | null;
   latitude: number | null;
   longitude: number | null;
+  address: string | null;
+  google_place_id: string | null;
 };
 
 type DishResult = {
   id: string;
   name: string;
+};
+
+type GooglePlaceSuggestion = {
+  placePrediction?: {
+    placeId?: string;
+    text?: {
+      text?: string;
+    };
+    structuredFormat?: {
+      mainText?: {
+        text?: string;
+      };
+      secondaryText?: {
+        text?: string;
+      };
+    };
+  };
+};
+
+type GooglePlaceDetails = {
+  google_place_id: string;
+  name: string;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  latitude: number | null;
+  longitude: number | null;
 };
 
 export default function LogScreen() {
@@ -40,16 +69,29 @@ export default function LogScreen() {
     RestaurantResult[]
   >([]);
 
+  const [googleResults, setGoogleResults] = useState<GooglePlaceSuggestion[]>(
+    [],
+  );
+
+  const [googleLoading, setGoogleLoading] = useState(false);
+
   const [selectedRestaurantId, setSelectedRestaurantId] = useState<
     string | null
   >(null);
+
+  const [googlePlaceId, setGooglePlaceId] = useState<string | null>(null);
+
+  const [address, setAddress] = useState("");
 
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
 
   const [latitude, setLatitude] = useState<number | null>(null);
-
   const [longitude, setLongitude] = useState<number | null>(null);
+
+  const [searchLatitude, setSearchLatitude] = useState<number | null>(null);
+
+  const [searchLongitude, setSearchLongitude] = useState<number | null>(null);
 
   const [gettingLocation, setGettingLocation] = useState(false);
 
@@ -62,7 +104,6 @@ export default function LogScreen() {
   const [rating, setRating] = useState(0);
 
   const [ratingWidth, setRatingWidth] = useState(0);
-
   const [ratingLeftX, setRatingLeftX] = useState(0);
 
   const ratingRowRef = useRef<View>(null);
@@ -73,9 +114,108 @@ export default function LogScreen() {
 
   const [loading, setLoading] = useState(false);
 
+  const googleSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
+  const googleSessionToken = useRef(createSessionToken());
+
+  function createSessionToken() {
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
+      /[xy]/g,
+      (character) => {
+        const random = Math.floor(Math.random() * 16);
+
+        const value = character === "x" ? random : (random & 0x3) | 0x8;
+
+        return value.toString(16);
+      },
+    );
+  }
+
+  function resetGoogleSession() {
+    googleSessionToken.current = createSessionToken();
+  }
+  useEffect(() => {
+    async function loadSearchLocation() {
+      try {
+        const existingPermission =
+          await Location.getForegroundPermissionsAsync();
+
+        let permission = existingPermission;
+
+        if (!existingPermission.granted) {
+          permission = await Location.requestForegroundPermissionsAsync();
+        }
+
+        if (!permission.granted) {
+          return;
+        }
+
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+
+        setSearchLatitude(location.coords.latitude);
+        setSearchLongitude(location.coords.longitude);
+      } catch (error) {
+        console.log("Could not get location for restaurant search:", error);
+      }
+    }
+
+    loadSearchLocation();
+  }, []);
+  async function searchGooglePlaces(text: string) {
+    const trimmed = text.trim();
+
+    if (trimmed.length < 3) {
+      setGoogleResults([]);
+      setGoogleLoading(false);
+      return;
+    }
+
+    setGoogleLoading(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "google-places-autocomplete",
+        {
+          body: {
+            input: trimmed,
+            sessionToken: googleSessionToken.current,
+            latitude: searchLatitude,
+            longitude: searchLongitude,
+          },
+        },
+      );
+
+      if (error) {
+        console.log("Google autocomplete function error:", error.message);
+
+        setGoogleResults([]);
+        return;
+      }
+
+      const suggestions = Array.isArray(data?.suggestions)
+        ? data.suggestions
+        : [];
+
+      setGoogleResults(suggestions);
+    } catch (error) {
+      console.log("Google autocomplete error:", error);
+
+      setGoogleResults([]);
+    } finally {
+      setGoogleLoading(false);
+    }
+  }
+
   async function searchRestaurants(text: string) {
     setRestaurantName(text);
+
     setSelectedRestaurantId(null);
+    setGooglePlaceId(null);
+    setAddress("");
 
     setCity("");
     setState("");
@@ -88,8 +228,14 @@ export default function LogScreen() {
 
     const trimmed = text.trim();
 
+    if (googleSearchTimeout.current) {
+      clearTimeout(googleSearchTimeout.current);
+    }
+
     if (trimmed.length < 2) {
       setRestaurantResults([]);
+      setGoogleResults([]);
+      setGoogleLoading(false);
       return;
     }
 
@@ -97,31 +243,50 @@ export default function LogScreen() {
       .from("restaurants")
       .select(
         `
-          id,
-          name,
-          city,
-          state,
-          latitude,
-          longitude
-        `,
+        id,
+        name,
+        city,
+        state,
+        latitude,
+        longitude,
+        address,
+        google_place_id
+      `,
       )
       .ilike("name", `%${trimmed}%`)
       .limit(8);
 
     if (error) {
       console.log("Restaurant search error:", error.message);
-      return;
+    } else {
+      setRestaurantResults((data ?? []) as RestaurantResult[]);
     }
 
-    setRestaurantResults((data ?? []) as RestaurantResult[]);
+    if (trimmed.length >= 3) {
+      setGoogleLoading(true);
+
+      googleSearchTimeout.current = setTimeout(() => {
+        searchGooglePlaces(trimmed);
+      }, 350);
+    } else {
+      setGoogleResults([]);
+      setGoogleLoading(false);
+    }
   }
 
   function selectRestaurant(restaurant: RestaurantResult) {
+    if (googleSearchTimeout.current) {
+      clearTimeout(googleSearchTimeout.current);
+    }
+
     setRestaurantName(restaurant.name);
 
     setCity(restaurant.city ?? "");
-
     setState(restaurant.state ?? "");
+
+    setAddress(restaurant.address ?? "");
+
+    setGooglePlaceId(restaurant.google_place_id ?? null);
 
     setLatitude(
       restaurant.latitude !== null ? Number(restaurant.latitude) : null,
@@ -134,10 +299,114 @@ export default function LogScreen() {
     setSelectedRestaurantId(restaurant.id);
 
     setRestaurantResults([]);
+    setGoogleResults([]);
+    setGoogleLoading(false);
 
     setDishName("");
     setSelectedDishId(null);
     setDishResults([]);
+  }
+
+  async function selectGoogleRestaurant(suggestion: GooglePlaceSuggestion) {
+    const placeId = suggestion.placePrediction?.placeId;
+
+    if (!placeId) {
+      Alert.alert(
+        "Google Places error",
+        "This restaurant result did not include a place ID.",
+      );
+
+      return;
+    }
+
+    if (googleSearchTimeout.current) {
+      clearTimeout(googleSearchTimeout.current);
+    }
+
+    setGoogleLoading(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "google-place-details",
+        {
+          body: {
+            placeId,
+            sessionToken: googleSessionToken.current,
+          },
+        },
+      );
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      const details = data as GooglePlaceDetails;
+
+      if (!details?.google_place_id || !details?.name) {
+        throw new Error("Google did not return complete place details.");
+      }
+
+      const { data: existingRestaurant, error: existingError } = await supabase
+        .from("restaurants")
+        .select(
+          `
+            id,
+            name,
+            city,
+            state,
+            latitude,
+            longitude,
+            address,
+            google_place_id
+          `,
+        )
+        .eq("google_place_id", details.google_place_id)
+        .maybeSingle();
+
+      if (existingError) {
+        throw new Error(existingError.message);
+      }
+
+      if (existingRestaurant) {
+        selectRestaurant(existingRestaurant as RestaurantResult);
+        resetGoogleSession();
+        return;
+      }
+
+      setRestaurantName(details.name);
+      setGooglePlaceId(details.google_place_id);
+
+      setAddress(details.address ?? "");
+
+      setCity(details.city ?? "");
+      setState(details.state ?? "");
+
+      setLatitude(details.latitude !== null ? Number(details.latitude) : null);
+
+      setLongitude(
+        details.longitude !== null ? Number(details.longitude) : null,
+      );
+
+      setSelectedRestaurantId(null);
+
+      setRestaurantResults([]);
+      setGoogleResults([]);
+
+      setDishName("");
+      setSelectedDishId(null);
+      setDishResults([]);
+
+      resetGoogleSession();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not load this restaurant.";
+
+      Alert.alert("Google Places error", message);
+    } finally {
+      setGoogleLoading(false);
+    }
   }
 
   async function useCurrentLocation() {
@@ -186,7 +455,6 @@ export default function LogScreen() {
       });
 
       setLatitude(location.coords.latitude);
-
       setLongitude(location.coords.longitude);
     } catch (error) {
       const message =
@@ -237,9 +505,7 @@ export default function LogScreen() {
 
   function selectDish(dish: DishResult) {
     setDishName(dish.name);
-
     setSelectedDishId(dish.id);
-
     setDishResults([]);
   }
 
@@ -312,10 +578,25 @@ export default function LogScreen() {
     }
 
     const trimmedName = restaurantName.trim();
-
     const trimmedCity = city.trim();
-
     const trimmedState = state.trim();
+    const trimmedAddress = address.trim();
+
+    if (googlePlaceId) {
+      const { data: googleMatch, error: googleMatchError } = await supabase
+        .from("restaurants")
+        .select("id")
+        .eq("google_place_id", googlePlaceId)
+        .maybeSingle();
+
+      if (googleMatchError) {
+        throw new Error(googleMatchError.message);
+      }
+
+      if (googleMatch) {
+        return googleMatch.id;
+      }
+    }
 
     let exactQuery = supabase
       .from("restaurants")
@@ -342,8 +623,10 @@ export default function LogScreen() {
         name: trimmedName,
         city: trimmedCity,
         state: trimmedState,
+        address: trimmedAddress || null,
         latitude,
         longitude,
+        google_place_id: googlePlaceId,
       })
       .select("id")
       .single();
@@ -396,31 +679,26 @@ export default function LogScreen() {
   async function logDish() {
     if (!restaurantName.trim()) {
       Alert.alert("Missing restaurant", "Enter a restaurant name.");
-
       return;
     }
 
     if (!selectedRestaurantId && !city.trim()) {
       Alert.alert("Missing city", "Enter the city for this new restaurant.");
-
       return;
     }
 
     if (!selectedRestaurantId && !state.trim()) {
       Alert.alert("Missing state", "Enter the state for this new restaurant.");
-
       return;
     }
 
     if (!dishName.trim()) {
       Alert.alert("Missing dish", "Enter a dish name.");
-
       return;
     }
 
     if (rating < 0.5 || rating > 5) {
       Alert.alert("Missing rating", "Choose a rating before logging the dish.");
-
       return;
     }
 
@@ -472,7 +750,11 @@ export default function LogScreen() {
 
       setRestaurantName("");
       setRestaurantResults([]);
+      setGoogleResults([]);
       setSelectedRestaurantId(null);
+
+      setGooglePlaceId(null);
+      setAddress("");
 
       setCity("");
       setState("");
@@ -487,6 +769,8 @@ export default function LogScreen() {
       setRating(0);
       setReviewText("");
       setPhotoUri(null);
+
+      resetGoogleSession();
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Something went wrong.";
@@ -523,45 +807,16 @@ export default function LogScreen() {
   }
 
   function getRatingLabel(value: number) {
-    if (value === 0.5) {
-      return "Horrible";
-    }
-
-    if (value === 1) {
-      return "Awful";
-    }
-
-    if (value === 1.5) {
-      return "Bad";
-    }
-
-    if (value === 2) {
-      return "Below Average";
-    }
-
-    if (value === 2.5) {
-      return "Mid";
-    }
-
-    if (value === 3) {
-      return "Decent";
-    }
-
-    if (value === 3.5) {
-      return "Good";
-    }
-
-    if (value === 4) {
-      return "Great";
-    }
-
-    if (value === 4.5) {
-      return "Amazing";
-    }
-
-    if (value === 5) {
-      return "Perfection";
-    }
+    if (value === 0.5) return "Horrible";
+    if (value === 1) return "Awful";
+    if (value === 1.5) return "Bad";
+    if (value === 2) return "Below Average";
+    if (value === 2.5) return "Mid";
+    if (value === 3) return "Decent";
+    if (value === 3.5) return "Good";
+    if (value === 4) return "Great";
+    if (value === 4.5) return "Amazing";
+    if (value === 5) return "Perfection";
 
     return "Tap or drag to rate";
   }
@@ -596,14 +851,14 @@ export default function LogScreen() {
           onChangeText={searchRestaurants}
         />
 
-        {restaurantResults.length > 0 && !selectedRestaurantId ? (
+        {restaurantResults.length > 0 ? (
           <View style={styles.resultsBox}>
-            <Text style={styles.resultsLabel}>Existing restaurants</Text>
+            <Text style={styles.resultsLabel}>Already on Food App</Text>
 
             {restaurantResults.map((restaurant) => {
-              const locationText = [restaurant.city, restaurant.state]
-                .filter(Boolean)
-                .join(", ");
+              const locationText =
+                restaurant.address ||
+                [restaurant.city, restaurant.state].filter(Boolean).join(", ");
 
               return (
                 <TouchableOpacity
@@ -622,6 +877,50 @@ export default function LogScreen() {
           </View>
         ) : null}
 
+        {googleLoading ? (
+          <View style={styles.googleLoadingRow}>
+            <ActivityIndicator size="small" />
+
+            <Text style={styles.googleLoadingText}>
+              Searching Google Places...
+            </Text>
+          </View>
+        ) : null}
+
+        {googleResults.length > 0 && !selectedRestaurantId ? (
+          <View style={styles.resultsBox}>
+            <Text style={styles.resultsLabel}>Google Places</Text>
+
+            {googleResults.map((suggestion, index) => {
+              const prediction = suggestion.placePrediction;
+
+              const placeId = prediction?.placeId ?? `google-${index}`;
+
+              const mainText =
+                prediction?.structuredFormat?.mainText?.text ??
+                prediction?.text?.text ??
+                "Restaurant";
+
+              const secondaryText =
+                prediction?.structuredFormat?.secondaryText?.text ?? "";
+
+              return (
+                <TouchableOpacity
+                  key={placeId}
+                  style={styles.resultItem}
+                  onPress={() => selectGoogleRestaurant(suggestion)}
+                >
+                  <Text style={styles.resultName}>{mainText}</Text>
+
+                  {secondaryText ? (
+                    <Text style={styles.resultSubtext}>{secondaryText}</Text>
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ) : null}
+
         {selectedRestaurantId ? (
           <View style={styles.selectedBox}>
             <Text style={styles.selectedTitle}>
@@ -630,10 +929,24 @@ export default function LogScreen() {
 
             <Text style={styles.selectedText}>{restaurantName}</Text>
 
-            {city || state ? (
+            {address ? (
+              <Text style={styles.selectedLocation}>{address}</Text>
+            ) : city || state ? (
               <Text style={styles.selectedLocation}>
                 {[city, state].filter(Boolean).join(", ")}
               </Text>
+            ) : null}
+          </View>
+        ) : googlePlaceId ? (
+          <View style={styles.googleSelectedBox}>
+            <Text style={styles.selectedTitle}>
+              ✓ Google restaurant selected
+            </Text>
+
+            <Text style={styles.selectedText}>{restaurantName}</Text>
+
+            {address ? (
+              <Text style={styles.selectedLocation}>{address}</Text>
             ) : null}
           </View>
         ) : creatingNewRestaurant ? (
@@ -641,8 +954,8 @@ export default function LogScreen() {
             <Text style={styles.newItemTitle}>New restaurant</Text>
 
             <Text style={styles.newItemText}>
-              If you don't select a result above, "{restaurantName.trim()}" will
-              be created.
+              Select a Google result above when possible. If you don't, "
+              {restaurantName.trim()}" will be created manually.
             </Text>
           </View>
         ) : null}
@@ -675,41 +988,57 @@ export default function LogScreen() {
           <View style={styles.locationSection}>
             <Text style={styles.locationLabel}>Restaurant Location</Text>
 
-            <Text style={styles.locationHelper}>
-              Optional. Only use your current location if you are physically at
-              the restaurant.
-            </Text>
-
-            {hasCoordinates ? (
+            {googlePlaceId && hasCoordinates ? (
               <View style={styles.locationSavedBox}>
                 <View style={styles.locationSavedInfo}>
                   <Text style={styles.locationSavedTitle}>
-                    ✓ Location saved
+                    ✓ Google location saved
                   </Text>
 
                   <Text style={styles.locationSavedText}>
-                    Coordinates will be attached to this restaurant.
+                    This restaurant's coordinates came from Google Places.
                   </Text>
                 </View>
-
-                <TouchableOpacity onPress={removeLocation}>
-                  <Text style={styles.removeLocationText}>Remove</Text>
-                </TouchableOpacity>
               </View>
             ) : (
-              <TouchableOpacity
-                style={styles.locationButton}
-                onPress={useCurrentLocation}
-                disabled={gettingLocation}
-              >
-                {gettingLocation ? (
-                  <ActivityIndicator size="small" />
+              <>
+                <Text style={styles.locationHelper}>
+                  Optional. Only use your current location if you are physically
+                  at the restaurant.
+                </Text>
+
+                {hasCoordinates ? (
+                  <View style={styles.locationSavedBox}>
+                    <View style={styles.locationSavedInfo}>
+                      <Text style={styles.locationSavedTitle}>
+                        ✓ Location saved
+                      </Text>
+
+                      <Text style={styles.locationSavedText}>
+                        Coordinates will be attached to this restaurant.
+                      </Text>
+                    </View>
+
+                    <TouchableOpacity onPress={removeLocation}>
+                      <Text style={styles.removeLocationText}>Remove</Text>
+                    </TouchableOpacity>
+                  </View>
                 ) : (
-                  <Text style={styles.locationButtonText}>
-                    Use Current Location
-                  </Text>
+                  <TouchableOpacity
+                    style={styles.locationButton}
+                    onPress={useCurrentLocation}
+                    disabled={gettingLocation}
+                  >
+                    {gettingLocation ? (
+                      <ActivityIndicator size="small" />
+                    ) : (
+                      <Text style={styles.locationButtonText}>
+                        Use Current Location
+                      </Text>
+                    )}
+                  </TouchableOpacity>
                 )}
-              </TouchableOpacity>
+              </>
             )}
           </View>
         ) : null}
@@ -724,7 +1053,7 @@ export default function LogScreen() {
           placeholder={
             selectedRestaurantId
               ? "Search or add a menu item"
-              : "Enter restaurant first"
+              : "Enter dish name"
           }
           placeholderTextColor="#888888"
           value={dishName}
@@ -733,9 +1062,8 @@ export default function LogScreen() {
 
         {!selectedRestaurantId && restaurantName.trim().length >= 2 ? (
           <Text style={styles.helperText}>
-            Select an existing restaurant above to search its existing dishes.
-            If this is a new restaurant, enter the dish and we'll check for
-            duplicates again when you log it.
+            If this restaurant has not been saved yet, enter the dish name and
+            we'll check for duplicates after the restaurant is created.
           </Text>
         ) : null}
 
@@ -987,7 +1315,29 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
+  googleLoadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 14,
+    paddingVertical: 4,
+  },
+
+  googleLoadingText: {
+    fontSize: 12,
+    color: "#777777",
+    marginLeft: 8,
+  },
+
   selectedBox: {
+    borderWidth: 1,
+    borderColor: "#dddddd",
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+    backgroundColor: "#f7f7f7",
+  },
+
+  googleSelectedBox: {
     borderWidth: 1,
     borderColor: "#dddddd",
     borderRadius: 10,
