@@ -1,12 +1,13 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
@@ -68,7 +69,21 @@ export default function FollowingScreen() {
       return;
     }
 
-    setProfiles(profileData ?? []);
+    const sortedProfiles = [...(profileData ?? [])].sort((a, b) => {
+      const aName = (
+        a.display_name ||
+        a.username
+      ).toLowerCase();
+
+      const bName = (
+        b.display_name ||
+        b.username
+      ).toLowerCase();
+
+      return aName.localeCompare(bName);
+    });
+
+    setProfiles(sortedProfiles);
   }
 
   if (loading) {
@@ -80,19 +95,38 @@ export default function FollowingScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Following</Text>
+    <ScrollView contentContainerStyle={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Following</Text>
+
+        <Text style={styles.subtitle}>
+          {profiles.length}{' '}
+          {profiles.length === 1 ? 'person' : 'people'}
+        </Text>
+      </View>
 
       {profiles.length === 0 ? (
-        <Text style={styles.emptyText}>
-          Not following anyone yet.
-        </Text>
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyTitle}>Not following anyone yet</Text>
+
+          <Text style={styles.emptyText}>
+            Profiles followed by this user will appear here.
+          </Text>
+        </View>
       ) : (
         profiles.map((profile) => (
           <TouchableOpacity
             key={profile.id}
             style={styles.userRow}
-            onPress={() => router.push(`/user/${profile.id}`)}
+            activeOpacity={0.7}
+            onPress={() =>
+              router.push({
+                pathname: '/user/[id]',
+                params: {
+                  id: profile.id,
+                },
+              })
+            }
           >
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>
@@ -111,18 +145,21 @@ export default function FollowingScreen() {
                 @{profile.username}
               </Text>
             </View>
+
+            <Text style={styles.chevron}>›</Text>
           </TouchableOpacity>
         ))
       )}
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flexGrow: 1,
     padding: 24,
     paddingTop: 70,
+    paddingBottom: 50,
     backgroundColor: '#ffffff',
   },
   centered: {
@@ -131,14 +168,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#ffffff',
   },
+  header: {
+    marginBottom: 18,
+  },
   title: {
-    fontSize: 28,
+    fontSize: 30,
     fontWeight: '700',
-    marginBottom: 20,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#777777',
+    marginTop: 4,
+  },
+  emptyCard: {
+    borderWidth: 1,
+    borderColor: '#eeeeee',
+    borderRadius: 14,
+    padding: 18,
+  },
+  emptyTitle: {
+    fontSize: 15,
+    fontWeight: '700',
   },
   emptyText: {
-    fontSize: 15,
+    fontSize: 13,
     color: '#777777',
+    lineHeight: 18,
+    marginTop: 4,
   },
   userRow: {
     flexDirection: 'row',
@@ -148,9 +204,9 @@ const styles = StyleSheet.create({
     borderBottomColor: '#eeeeee',
   },
   avatar: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: '#eeeeee',
     alignItems: 'center',
     justifyContent: 'center',
@@ -165,11 +221,16 @@ const styles = StyleSheet.create({
   },
   displayName: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   username: {
-    fontSize: 14,
-    color: '#666666',
-    marginTop: 2,
+    fontSize: 13,
+    color: '#777777',
+    marginTop: 3,
+  },
+  chevron: {
+    fontSize: 24,
+    color: '#aaaaaa',
+    marginLeft: 12,
   },
 });
