@@ -1,13 +1,13 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
@@ -50,6 +50,7 @@ export default function RestaurantDetailScreen() {
   const [dishes, setDishes] = useState<DishSummary[]>([]);
   const [reviews, setReviews] = useState<RecentReview[]>([]);
   const [averageRating, setAverageRating] = useState(0);
+  const [totalReviewCount, setTotalReviewCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useFocusEffect(
@@ -103,6 +104,7 @@ export default function RestaurantDetailScreen() {
       setDishes([]);
       setReviews([]);
       setAverageRating(0);
+      setTotalReviewCount(0);
       setLoading(false);
       return;
     }
@@ -136,6 +138,7 @@ export default function RestaurantDetailScreen() {
     }
 
     const allReviews = (reviewData ?? []) as any[];
+    setTotalReviewCount(allReviews.length);
 
     if (allReviews.length > 0) {
       const total = allReviews.reduce(
@@ -207,115 +210,157 @@ export default function RestaurantDetailScreen() {
     .join(', ');
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>{restaurant.name}</Text>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.scrollContent}
+    >
+      {/* Placeholder until restaurant photos are supported */}
+      <View style={styles.photoPlaceholder} />
 
-      {location ? (
-        <Text style={styles.location}>{location}</Text>
-      ) : null}
+      <View style={styles.container}>
+        <View style={styles.headerRow}>
+          <View style={styles.headerInfo}>
+            <Text style={styles.title}>{restaurant.name}</Text>
 
-      <View style={styles.ratingCard}>
-        <Text style={styles.ratingNumber}>
-          {averageRating > 0 ? averageRating.toFixed(1) : '—'} ★
-        </Text>
+            {location ? (
+              <Text style={styles.location}>{location}</Text>
+            ) : null}
+          </View>
 
-        <Text style={styles.ratingLabel}>
-          {reviews.length}{' '}
-          {reviews.length === 1 ? 'review' : 'reviews'}
-        </Text>
-      </View>
+          <View style={styles.headerRating}>
+            <Text style={styles.ratingNumber}>
+              {averageRating > 0 ? averageRating.toFixed(1) : '—'} ★
+            </Text>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Dishes</Text>
+            <Text style={styles.ratingLabel}>
+              {totalReviewCount}{' '}
+              {totalReviewCount === 1 ? 'review' : 'reviews'}
+            </Text>
+          </View>
+        </View>
 
-        {dishes.length === 0 ? (
-          <Text style={styles.emptyText}>
-            No dishes logged yet.
-          </Text>
-        ) : (
-          dishes.map((dish) => (
-            <View key={dish.id} style={styles.dishRow}>
-              <View style={styles.dishInfo}>
-                <Text style={styles.dishName}>
-                  {dish.name}
-                </Text>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Menu</Text>
 
-                <Text style={styles.dishSubtext}>
-                  {dish.reviewCount}{' '}
-                  {dish.reviewCount === 1 ? 'review' : 'reviews'}
-                </Text>
-              </View>
-
-              <Text style={styles.dishRating}>
-                {dish.averageRating > 0
-                  ? `${dish.averageRating.toFixed(1)} ★`
-                  : '—'}
-              </Text>
-            </View>
-          ))
-        )}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Recent Reviews</Text>
-
-        {reviews.length === 0 ? (
-          <Text style={styles.emptyText}>
-            No reviews yet.
-          </Text>
-        ) : (
-          reviews.map((review) => (
-            <TouchableOpacity
-              key={review.id}
-              style={styles.reviewCard}
-              onPress={() =>
-                router.push({
-                  pathname: '/review/[id]',
-                  params: { id: review.id },
-                })
-              }
-            >
-              <View style={styles.reviewTopRow}>
-                <View style={styles.reviewInfo}>
-                  <Text style={styles.reviewer}>
-                    {review.profiles?.display_name ||
-                      review.profiles?.username ||
-                      'User'}
+          {dishes.length === 0 ? (
+            <Text style={styles.emptyText}>
+              No dishes logged yet.
+            </Text>
+          ) : (
+            dishes.map((dish) => (
+              <TouchableOpacity
+                key={dish.id}
+                style={styles.dishRow}
+                onPress={() =>
+                  router.push({
+                    pathname: '/dish/[id]',
+                    params: { id: dish.id },
+                  })
+                }
+              >
+                <View style={styles.dishInfo}>
+                  <Text style={styles.dishName}>
+                    {dish.name}
                   </Text>
 
-                  <Text style={styles.reviewDish}>
-                    {review.dishes?.name ?? 'Unknown dish'}
+                  <Text style={styles.dishSubtext}>
+                    {dish.reviewCount}{' '}
+                    {dish.reviewCount === 1 ? 'review' : 'reviews'}
                   </Text>
                 </View>
 
-                <Text style={styles.reviewRating}>
-                  {review.rating}★
+                <Text style={styles.dishRating}>
+                  {dish.averageRating > 0
+                    ? `${dish.averageRating.toFixed(1)} ★`
+                    : '—'}
                 </Text>
-              </View>
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
 
-              {review.review_text ? (
-                <Text
-                  style={styles.reviewText}
-                  numberOfLines={3}
-                >
-                  {review.review_text}
-                </Text>
-              ) : null}
-            </TouchableOpacity>
-          ))
-        )}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Recent Reviews</Text>
+
+          {reviews.length === 0 ? (
+            <Text style={styles.emptyText}>
+              No reviews yet.
+            </Text>
+          ) : (
+            reviews.map((review) => (
+              <TouchableOpacity
+                key={review.id}
+                style={styles.reviewCard}
+                onPress={() =>
+                  router.push({
+                    pathname: '/review/[id]',
+                    params: { id: review.id },
+                  })
+                }
+              >
+                <View style={styles.reviewTopRow}>
+                  <View style={styles.reviewInfo}>
+                    <Text style={styles.reviewer}>
+                      {review.profiles?.display_name ||
+                        review.profiles?.username ||
+                        'User'}
+                    </Text>
+
+                    <Text style={styles.reviewDish}>
+                      {review.dishes?.name ?? 'Unknown dish'}
+                    </Text>
+                  </View>
+
+                  <Text style={styles.reviewRating}>
+                    {review.rating}★
+                  </Text>
+                </View>
+
+                {review.review_text ? (
+                  <Text
+                    style={styles.reviewText}
+                    numberOfLines={3}
+                  >
+                    {review.review_text}
+                  </Text>
+                ) : null}
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
       </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    padding: 24,
-    paddingTop: 70,
-    paddingBottom: 50,
+  screen: {
+    flex: 1,
     backgroundColor: '#ffffff',
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 50,
+  },
+  photoPlaceholder: {
+    width: '100%',
+    height: 220,
+    backgroundColor: '#eeeeee',
+  },
+  container: {
+    padding: 24,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  headerInfo: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  headerRating: {
+    alignItems: 'flex-end',
   },
   centered: {
     flex: 1,
@@ -336,16 +381,8 @@ const styles = StyleSheet.create({
     color: '#666666',
     marginTop: 6,
   },
-  ratingCard: {
-    marginTop: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: '#eeeeee',
-    borderRadius: 14,
-    alignItems: 'center',
-  },
   ratingNumber: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '700',
   },
   ratingLabel: {
