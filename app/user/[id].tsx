@@ -1,9 +1,7 @@
-import {
-  router,
-  useFocusEffect,
-  useLocalSearchParams,
-} from 'expo-router';
-import { useCallback, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+
+import { useCallback, useState } from "react";
+
 import {
   ActivityIndicator,
   Alert,
@@ -13,26 +11,36 @@ import {
   Text,
   TouchableOpacity,
   View,
-} from 'react-native';
+} from "react-native";
 
-import { supabase } from '@/lib/supabase';
+import { supabase } from "@/lib/supabase";
 
 type PublicProfile = {
   id: string;
+
   username: string;
+
   display_name: string | null;
+
   bio: string | null;
+
   avatar_path: string | null;
+  city: string | null;
 };
 
 type RankedDish = {
   id: string;
+
   rank: number;
+
   dishes: {
     id: string;
+
     name: string;
+
     restaurants: {
       id: string;
+
       name: string;
     } | null;
   } | null;
@@ -40,26 +48,39 @@ type RankedDish = {
 
 type RankedRestaurant = {
   id: string;
+
   rank: number;
+
   restaurants: {
     id: string;
+
     name: string;
+
     city: string | null;
   } | null;
 };
 
 type DiaryEntry = {
   id: string;
+
   rating: number;
+
   review_text: string | null;
+
   photo_path: string | null;
+
   date_eaten: string;
+
   dishes: {
     id: string;
+
     name: string;
+
     restaurants: {
       id: string;
+
       name: string;
+
       city: string | null;
     } | null;
   } | null;
@@ -69,30 +90,33 @@ export default function UserProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [profile, setProfile] = useState<PublicProfile | null>(null);
+
   const [topDishes, setTopDishes] = useState<RankedDish[]>([]);
-  const [topRestaurants, setTopRestaurants] = useState<
-    RankedRestaurant[]
-  >([]);
+
+  const [topRestaurants, setTopRestaurants] = useState<RankedRestaurant[]>([]);
+
   const [diary, setDiary] = useState<DiaryEntry[]>([]);
 
   const [loading, setLoading] = useState(true);
+
   const [isFollowing, setIsFollowing] = useState(false);
 
   const [followerCount, setFollowerCount] = useState(0);
+
   const [followingCount, setFollowingCount] = useState(0);
 
   const [reviewCount, setReviewCount] = useState(0);
+
   const [dishCount, setDishCount] = useState(0);
+
   const [restaurantCount, setRestaurantCount] = useState(0);
 
-  const [currentUserId, setCurrentUserId] = useState<string | null>(
-    null
-  );
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       loadProfile();
-    }, [id])
+    }, [id]),
   );
 
   async function loadProfile() {
@@ -104,21 +128,25 @@ export default function UserProfileScreen() {
 
     const {
       data: profileData,
+
       error: profileError,
     } = await supabase
-      .from('profiles')
-      .select(
-        'id, username, display_name, bio, avatar_path'
-      )
-      .eq('id', id)
+
+      .from("profiles")
+
+      .select("id, username, display_name, bio, avatar_path, city")
+
+      .eq("id", id)
+
       .maybeSingle();
 
     if (profileError) {
       setLoading(false);
 
       Alert.alert(
-        'Profile error',
-        profileError.message
+        "Profile error",
+
+        profileError.message,
       );
 
       return;
@@ -126,7 +154,9 @@ export default function UserProfileScreen() {
 
     if (!profileData) {
       setLoading(false);
+
       setProfile(null);
+
       return;
     }
 
@@ -139,13 +169,16 @@ export default function UserProfileScreen() {
     setCurrentUserId(user?.id ?? null);
 
     if (user && user.id !== id) {
-      const {
-        data: followData,
-      } = await supabase
-        .from('follows')
-        .select('id')
-        .eq('follower_id', user.id)
-        .eq('following_id', id)
+      const { data: followData } = await supabase
+
+        .from("follows")
+
+        .select("id")
+
+        .eq("follower_id", user.id)
+
+        .eq("following_id", id)
+
         .maybeSingle();
 
       setIsFollowing(!!followData);
@@ -153,49 +186,71 @@ export default function UserProfileScreen() {
       setIsFollowing(false);
     }
 
-    const {
-      count: followers,
-    } = await supabase
-      .from('follows')
-      .select('*', {
-        count: 'exact',
+    const { count: followers } = await supabase
+
+      .from("follows")
+
+      .select("*", {
+        count: "exact",
+
         head: true,
       })
-      .eq('following_id', id);
+
+      .eq("following_id", id);
 
     setFollowerCount(followers ?? 0);
 
-    const {
-      count: following,
-    } = await supabase
-      .from('follows')
-      .select('*', {
-        count: 'exact',
+    const { count: following } = await supabase
+
+      .from("follows")
+
+      .select("*", {
+        count: "exact",
+
         head: true,
       })
-      .eq('follower_id', id);
+
+      .eq("follower_id", id);
 
     setFollowingCount(following ?? 0);
 
     const {
       data: dishData,
+
       error: dishError,
     } = await supabase
-      .from('dish_rankings')
-      .select(`
+
+      .from("dish_rankings")
+
+      .select(
+        `
+
         id,
+
         rank,
+
         dishes (
+
           id,
+
           name,
+
           restaurants (
+
             id,
+
             name
+
           )
+
         )
-      `)
-      .eq('user_id', id)
-      .order('rank', {
+
+      `,
+      )
+
+      .eq("user_id", id)
+
+      .order("rank", {
         ascending: true,
       });
 
@@ -203,33 +258,47 @@ export default function UserProfileScreen() {
       setLoading(false);
 
       Alert.alert(
-        'Ranking error',
-        dishError.message
+        "Ranking error",
+
+        dishError.message,
       );
 
       return;
     }
 
-    setTopDishes(
-      (dishData ?? []) as unknown as RankedDish[]
-    );
+    setTopDishes((dishData ?? []) as unknown as RankedDish[]);
 
     const {
       data: restaurantData,
+
       error: restaurantError,
     } = await supabase
-      .from('restaurant_rankings')
-      .select(`
+
+      .from("restaurant_rankings")
+
+      .select(
+        `
+
         id,
+
         rank,
+
         restaurants (
+
           id,
+
           name,
+
           city
+
         )
-      `)
-      .eq('user_id', id)
-      .order('rank', {
+
+      `,
+      )
+
+      .eq("user_id", id)
+
+      .order("rank", {
         ascending: true,
       });
 
@@ -237,43 +306,65 @@ export default function UserProfileScreen() {
       setLoading(false);
 
       Alert.alert(
-        'Ranking error',
-        restaurantError.message
+        "Ranking error",
+
+        restaurantError.message,
       );
 
       return;
     }
 
-    setTopRestaurants(
-      (restaurantData ?? []) as unknown as RankedRestaurant[]
-    );
+    setTopRestaurants((restaurantData ?? []) as unknown as RankedRestaurant[]);
 
     const {
       data: diaryData,
+
       error: diaryError,
     } = await supabase
-      .from('reviews')
-      .select(`
+
+      .from("reviews")
+
+      .select(
+        `
+
         id,
+
         rating,
+
         review_text,
+
         photo_path,
+
         date_eaten,
+
         dishes (
+
           id,
+
           name,
+
           restaurants (
+
             id,
+
             name,
+
             city
+
           )
+
         )
-      `)
-      .eq('user_id', id)
-      .order('date_eaten', {
+
+      `,
+      )
+
+      .eq("user_id", id)
+
+      .order("date_eaten", {
         ascending: false,
       })
-      .order('created_at', {
+
+      .order("created_at", {
         ascending: false,
       });
 
@@ -281,8 +372,9 @@ export default function UserProfileScreen() {
       setLoading(false);
 
       Alert.alert(
-        'Diary error',
-        diaryError.message
+        "Diary error",
+
+        diaryError.message,
       );
 
       return;
@@ -296,24 +388,23 @@ export default function UserProfileScreen() {
 
     const uniqueDishIds = new Set(
       entries
+
         .map((entry) => entry.dishes?.id)
-        .filter(Boolean)
+
+        .filter(Boolean),
     );
 
     setDishCount(uniqueDishIds.size);
 
     const uniqueRestaurantIds = new Set(
       entries
-        .map(
-          (entry) =>
-            entry.dishes?.restaurants?.id
-        )
-        .filter(Boolean)
+
+        .map((entry) => entry.dishes?.restaurants?.id)
+
+        .filter(Boolean),
     );
 
-    setRestaurantCount(
-      uniqueRestaurantIds.size
-    );
+    setRestaurantCount(uniqueRestaurantIds.size);
 
     setLoading(false);
   }
@@ -321,17 +412,15 @@ export default function UserProfileScreen() {
   async function toggleFollow() {
     const {
       data: { user },
+
       error: userError,
     } = await supabase.auth.getUser();
 
-    if (
-      userError ||
-      !user ||
-      !id
-    ) {
+    if (userError || !user || !id) {
       Alert.alert(
-        'Error',
-        'You must be signed in.'
+        "Error",
+
+        "You must be signed in.",
       );
 
       return;
@@ -343,15 +432,20 @@ export default function UserProfileScreen() {
 
     if (isFollowing) {
       const { error } = await supabase
-        .from('follows')
+
+        .from("follows")
+
         .delete()
-        .eq('follower_id', user.id)
-        .eq('following_id', id);
+
+        .eq("follower_id", user.id)
+
+        .eq("following_id", id);
 
       if (error) {
         Alert.alert(
-          'Unfollow error',
-          error.message
+          "Unfollow error",
+
+          error.message,
         );
 
         return;
@@ -359,21 +453,23 @@ export default function UserProfileScreen() {
 
       setIsFollowing(false);
 
-      setFollowerCount((current) =>
-        Math.max(0, current - 1)
-      );
+      setFollowerCount((current) => Math.max(0, current - 1));
     } else {
       const { error } = await supabase
-        .from('follows')
+
+        .from("follows")
+
         .insert({
           follower_id: user.id,
+
           following_id: id,
         });
 
       if (error) {
         Alert.alert(
-          'Follow error',
-          error.message
+          "Follow error",
+
+          error.message,
         );
 
         return;
@@ -381,56 +477,48 @@ export default function UserProfileScreen() {
 
       setIsFollowing(true);
 
-      setFollowerCount(
-        (current) => current + 1
-      );
+      setFollowerCount((current) => current + 1);
     }
   }
 
-  function getPhotoUrl(
-    path: string
-  ) {
-    const { data } =
-      supabase.storage
-        .from('review-photos')
-        .getPublicUrl(path);
+  function getPhotoUrl(path: string) {
+    const { data } = supabase.storage
+
+      .from("review-photos")
+
+      .getPublicUrl(path);
 
     return data.publicUrl;
   }
 
-  function getProfilePhotoUrl(
-    path: string
-  ) {
-    const { data } =
-      supabase.storage
-        .from('profile-photos')
-        .getPublicUrl(path);
+  function getProfilePhotoUrl(path: string) {
+    const { data } = supabase.storage
+
+      .from("profile-photos")
+
+      .getPublicUrl(path);
 
     return data.publicUrl;
   }
 
-  function formatDate(
-    date: string
-  ) {
-    const parsedDate = new Date(
-      `${date}T00:00:00`
-    );
+  function formatDate(date: string) {
+    const parsedDate = new Date(`${date}T00:00:00`);
 
     return parsedDate.toLocaleDateString(
       undefined,
+
       {
-        month: 'short',
-        day: 'numeric',
-      }
+        month: "short",
+
+        day: "numeric",
+      },
     );
   }
 
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator
-          size="large"
-        />
+        <ActivityIndicator size="large" />
       </View>
     );
   }
@@ -438,343 +526,171 @@ export default function UserProfileScreen() {
   if (!profile) {
     return (
       <View style={styles.centered}>
-        <Text>
-          Profile not found.
-        </Text>
+        <Text>Profile not found.</Text>
       </View>
     );
   }
 
   return (
-    <ScrollView
-      contentContainerStyle={
-        styles.container
-      }
-    >
-      <View
-        style={
-          styles.profileHeader
-        }
-      >
+    <ScrollView contentContainerStyle={styles.container}>
+      <View style={styles.profileHeader}>
         {profile.avatar_path ? (
           <Image
             source={{
-              uri: getProfilePhotoUrl(
-                profile.avatar_path
-              ),
+              uri: getProfilePhotoUrl(profile.avatar_path),
             }}
-            style={
-              styles.profileAvatar
-            }
+            style={styles.profileAvatar}
             resizeMode="cover"
           />
         ) : (
-          <View
-            style={
-              styles.avatarPlaceholder
-            }
-          >
-            <Text
-              style={
-                styles.avatarText
-              }
-            >
-              {(
-                profile.display_name ||
-                profile.username
-              )
+          <View style={styles.avatarPlaceholder}>
+            <Text style={styles.avatarText}>
+              {(profile.display_name || profile.username)
+
                 .charAt(0)
+
                 .toUpperCase()}
             </Text>
           </View>
         )}
 
-        <Text
-          style={
-            styles.displayName
-          }
-        >
-          {profile.display_name ||
-            profile.username}
+        <Text style={styles.displayName}>
+          {profile.display_name || profile.username}
         </Text>
 
-        <Text
-          style={styles.username}
-        >
-          @{profile.username}
-        </Text>
+        <Text style={styles.username}>@{profile.username}</Text>
 
-        {profile.bio ? (
-          <Text
-            style={styles.bio}
-          >
-            {profile.bio}
-          </Text>
+        {profile.city?.trim() ? (
+          <View style={styles.cityRow}>
+            <Text style={styles.cityPin}>📍</Text>
+            <Text style={styles.cityText}>{profile.city.trim()}</Text>
+          </View>
         ) : null}
+
+        {profile.bio ? <Text style={styles.bio}>{profile.bio}</Text> : null}
 
         {currentUserId !== id ? (
           <TouchableOpacity
-            style={[
-              styles.followButton,
-              isFollowing &&
-                styles.followingButton,
-            ]}
-            onPress={
-              toggleFollow
-            }
+            style={[styles.followButton, isFollowing && styles.followingButton]}
+            onPress={toggleFollow}
           >
             <Text
               style={[
                 styles.followButtonText,
-                isFollowing &&
-                  styles.followingButtonText,
+
+                isFollowing && styles.followingButtonText,
               ]}
             >
-              {isFollowing
-                ? 'Following'
-                : 'Follow'}
+              {isFollowing ? "Following" : "Follow"}
             </Text>
           </TouchableOpacity>
         ) : null}
       </View>
 
-      <View
-        style={styles.statsCard}
-      >
+      <View style={styles.statsCard}>
         <View style={styles.stat}>
-          <Text
-            style={
-              styles.statNumber
-            }
-          >
-            {reviewCount}
-          </Text>
+          <Text style={styles.statNumber}>{reviewCount}</Text>
 
-          <Text
-            style={
-              styles.statLabel
-            }
-          >
-            Reviews
-          </Text>
+          <Text style={styles.statLabel}>Reviews</Text>
         </View>
 
-        <View
-          style={
-            styles.statDivider
-          }
-        />
+        <View style={styles.statDivider} />
 
         <View style={styles.stat}>
-          <Text
-            style={
-              styles.statNumber
-            }
-          >
-            {dishCount}
-          </Text>
+          <Text style={styles.statNumber}>{dishCount}</Text>
 
-          <Text
-            style={
-              styles.statLabel
-            }
-          >
-            Dishes
-          </Text>
+          <Text style={styles.statLabel}>Dishes</Text>
         </View>
 
-        <View
-          style={
-            styles.statDivider
-          }
-        />
+        <View style={styles.statDivider} />
 
         <View style={styles.stat}>
-          <Text
-            style={
-              styles.statNumber
-            }
-          >
-            {restaurantCount}
-          </Text>
+          <Text style={styles.statNumber}>{restaurantCount}</Text>
 
-          <Text
-            style={
-              styles.statLabel
-            }
-          >
-            Restaurants
-          </Text>
+          <Text style={styles.statLabel}>Restaurants</Text>
         </View>
       </View>
 
-      <View
-        style={
-          styles.socialStats
-        }
-      >
+      <View style={styles.socialStats}>
         <TouchableOpacity
-          style={
-            styles.socialStat
-          }
+          style={styles.socialStat}
           onPress={() =>
             router.push({
-              pathname:
-                '/followers',
+              pathname: "/followers",
+
               params: {
                 userId: id,
               },
             })
           }
         >
-          <Text
-            style={
-              styles.socialNumber
-            }
-          >
-            {followerCount}
-          </Text>
+          <Text style={styles.socialNumber}>{followerCount}</Text>
 
-          <Text
-            style={
-              styles.socialLabel
-            }
-          >
-            {followerCount === 1
-              ? 'Follower'
-              : 'Followers'}
+          <Text style={styles.socialLabel}>
+            {followerCount === 1 ? "Follower" : "Followers"}
           </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={
-            styles.socialStat
-          }
+          style={styles.socialStat}
           onPress={() =>
             router.push({
-              pathname:
-                '/following',
+              pathname: "/following",
+
               params: {
                 userId: id,
               },
             })
           }
         >
-          <Text
-            style={
-              styles.socialNumber
-            }
-          >
-            {followingCount}
-          </Text>
+          <Text style={styles.socialNumber}>{followingCount}</Text>
 
-          <Text
-            style={
-              styles.socialLabel
-            }
-          >
-            Following
-          </Text>
+          <Text style={styles.socialLabel}>Following</Text>
         </TouchableOpacity>
       </View>
 
-      <View
-        style={styles.section}
-      >
-        <Text
-          style={
-            styles.sectionTitle
-          }
-        >
-          Top Dishes
-        </Text>
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Top Dishes</Text>
 
-        {topDishes.length ===
-        0 ? (
-          <View
-            style={
-              styles.emptyCard
-            }
-          >
-            <Text
-              style={
-                styles.emptyText
-              }
-            >
-              Nothing ranked yet.
-            </Text>
+        {topDishes.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyText}>Nothing ranked yet.</Text>
           </View>
         ) : (
-          <View
-            style={
-              styles.featureGrid
-            }
-          >
+          <View style={styles.featureGrid}>
             {topDishes
+
               .slice(0, 4)
+
               .map((item) => (
                 <TouchableOpacity
                   key={item.id}
-                  style={
-                    styles.featureCard
-                  }
+                  style={styles.featureCard}
                   activeOpacity={0.7}
                   onPress={() => {
-                    if (
-                      !item.dishes?.id
-                    ) {
+                    if (!item.dishes?.id) {
                       return;
                     }
 
                     router.push({
-                      pathname:
-                        '/dish/[id]',
+                      pathname: "/dish/[id]",
+
                       params: {
-                        id: item
-                          .dishes.id,
+                        id: item.dishes.id,
                       },
                     });
                   }}
                 >
-                  <View
-                    style={
-                      styles.rankBadge
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.rankBadgeText
-                      }
-                    >
-                      #{item.rank}
-                    </Text>
+                  <View style={styles.rankBadge}>
+                    <Text style={styles.rankBadgeText}>#{item.rank}</Text>
                   </View>
 
-                  <Text
-                    style={
-                      styles.featureName
-                    }
-                    numberOfLines={
-                      2
-                    }
-                  >
-                    {item.dishes
-                      ?.name ??
-                      'Unknown dish'}
+                  <Text style={styles.featureName} numberOfLines={2}>
+                    {item.dishes?.name ?? "Unknown dish"}
                   </Text>
 
-                  <Text
-                    style={
-                      styles.featureSubtext
-                    }
-                    numberOfLines={
-                      1
-                    }
-                  >
-                    {item.dishes
-                      ?.restaurants
-                      ?.name ??
-                      'Unknown restaurant'}
+                  <Text style={styles.featureSubtext} numberOfLines={1}>
+                    {item.dishes?.restaurants?.name ?? "Unknown restaurant"}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -782,107 +698,48 @@ export default function UserProfileScreen() {
         )}
       </View>
 
-      <View
-        style={styles.section}
-      >
-        <Text
-          style={
-            styles.sectionTitle
-          }
-        >
-          Top Restaurants
-        </Text>
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Top Restaurants</Text>
 
-        {topRestaurants.length ===
-        0 ? (
-          <View
-            style={
-              styles.emptyCard
-            }
-          >
-            <Text
-              style={
-                styles.emptyText
-              }
-            >
-              Nothing ranked yet.
-            </Text>
+        {topRestaurants.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyText}>Nothing ranked yet.</Text>
           </View>
         ) : (
-          <View
-            style={
-              styles.featureGrid
-            }
-          >
+          <View style={styles.featureGrid}>
             {topRestaurants
+
               .slice(0, 4)
+
               .map((item) => (
                 <TouchableOpacity
                   key={item.id}
-                  style={
-                    styles.featureCard
-                  }
+                  style={styles.featureCard}
                   activeOpacity={0.7}
                   onPress={() => {
-                    if (
-                      !item
-                        .restaurants
-                        ?.id
-                    ) {
+                    if (!item.restaurants?.id) {
                       return;
                     }
 
                     router.push({
-                      pathname:
-                        '/restaurant/[id]',
+                      pathname: "/restaurant/[id]",
+
                       params: {
-                        id: item
-                          .restaurants
-                          .id,
+                        id: item.restaurants.id,
                       },
                     });
                   }}
                 >
-                  <View
-                    style={
-                      styles.rankBadge
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.rankBadgeText
-                      }
-                    >
-                      #{item.rank}
-                    </Text>
+                  <View style={styles.rankBadge}>
+                    <Text style={styles.rankBadgeText}>#{item.rank}</Text>
                   </View>
 
-                  <Text
-                    style={
-                      styles.featureName
-                    }
-                    numberOfLines={
-                      2
-                    }
-                  >
-                    {item
-                      .restaurants
-                      ?.name ??
-                      'Unknown restaurant'}
+                  <Text style={styles.featureName} numberOfLines={2}>
+                    {item.restaurants?.name ?? "Unknown restaurant"}
                   </Text>
 
-                  <Text
-                    style={
-                      styles.featureSubtext
-                    }
-                    numberOfLines={
-                      1
-                    }
-                  >
-                    {item
-                      .restaurants
-                      ?.city ??
-                      'Location unknown'}
+                  <Text style={styles.featureSubtext} numberOfLines={1}>
+                    {item.restaurants?.city ?? "Location unknown"}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -890,170 +747,78 @@ export default function UserProfileScreen() {
         )}
       </View>
 
-      <View
-        style={styles.section}
-      >
-        <Text
-          style={
-            styles.sectionTitle
-          }
-        >
-          Recent Diary
-        </Text>
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Recent Diary</Text>
 
         {diary.length === 0 ? (
-          <View
-            style={
-              styles.emptyCard
-            }
-          >
-            <Text
-              style={
-                styles.emptyText
-              }
-            >
-              Nothing logged yet.
-            </Text>
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyText}>Nothing logged yet.</Text>
           </View>
         ) : (
           diary.map((entry) => {
-            const photoUrl =
-              entry.photo_path
-                ? getPhotoUrl(
-                    entry.photo_path
-                  )
-                : null;
+            const photoUrl = entry.photo_path
+              ? getPhotoUrl(entry.photo_path)
+              : null;
 
             return (
               <TouchableOpacity
                 key={entry.id}
-                style={
-                  styles.diaryCard
-                }
+                style={styles.diaryCard}
                 activeOpacity={0.7}
                 onPress={() =>
                   router.push({
-                    pathname:
-                      '/review/[id]',
+                    pathname: "/review/[id]",
+
                     params: {
                       id: entry.id,
                     },
                   })
                 }
               >
-                <View
-                  style={
-                    styles.diaryContentRow
-                  }
-                >
+                <View style={styles.diaryContentRow}>
                   {photoUrl ? (
                     <Image
                       source={{
                         uri: photoUrl,
                       }}
-                      style={
-                        styles.diaryThumbnail
-                      }
+                      style={styles.diaryThumbnail}
                       resizeMode="cover"
                     />
                   ) : null}
 
-                  <View
-                    style={
-                      styles.diaryMainContent
-                    }
-                  >
-                    <View
-                      style={
-                        styles.diaryTopRow
-                      }
-                    >
-                      <View
-                        style={
-                          styles.diaryInfo
-                        }
-                      >
-                        <Text
-                          style={
-                            styles.dishName
-                          }
-                        >
-                          {entry
-                            .dishes
-                            ?.name ??
-                            'Unknown dish'}
+                  <View style={styles.diaryMainContent}>
+                    <View style={styles.diaryTopRow}>
+                      <View style={styles.diaryInfo}>
+                        <Text style={styles.dishName}>
+                          {entry.dishes?.name ?? "Unknown dish"}
                         </Text>
 
-                        <Text
-                          style={
-                            styles.restaurantName
-                          }
-                          numberOfLines={
-                            1
-                          }
-                        >
-                          {entry
-                            .dishes
-                            ?.restaurants
-                            ?.name ??
-                            'Unknown restaurant'}
+                        <Text style={styles.restaurantName} numberOfLines={1}>
+                          {entry.dishes?.restaurants?.name ??
+                            "Unknown restaurant"}
 
-                          {entry
-                            .dishes
-                            ?.restaurants
-                            ?.city
+                          {entry.dishes?.restaurants?.city
                             ? ` · ${entry.dishes.restaurants.city}`
-                            : ''}
+                            : ""}
                         </Text>
                       </View>
 
-                      <View
-                        style={
-                          styles.diaryRight
-                        }
-                      >
-                        <Text
-                          style={
-                            styles.rating
-                          }
-                        >
-                          {entry.rating}★
-                        </Text>
+                      <View style={styles.diaryRight}>
+                        <Text style={styles.rating}>{entry.rating}★</Text>
 
-                        <Text
-                          style={
-                            styles.dateText
-                          }
-                        >
-                          {formatDate(
-                            entry.date_eaten
-                          )}
+                        <Text style={styles.dateText}>
+                          {formatDate(entry.date_eaten)}
                         </Text>
                       </View>
                     </View>
 
                     {entry.review_text ? (
-                      <Text
-                        style={
-                          styles.reviewText
-                        }
-                        numberOfLines={
-                          2
-                        }
-                      >
-                        {
-                          entry.review_text
-                        }
+                      <Text style={styles.reviewText} numberOfLines={2}>
+                        {entry.review_text}
                       </Text>
                     ) : null}
 
-                    <Text
-                      style={
-                        styles.viewReview
-                      }
-                    >
-                      View review
-                    </Text>
+                    <Text style={styles.viewReview}>View review</Text>
                   </View>
                 </View>
               </TouchableOpacity>
@@ -1065,315 +830,401 @@ export default function UserProfileScreen() {
   );
 }
 
-const styles =
-  StyleSheet.create({
-    container: {
-      flexGrow: 1,
-      padding: 24,
-      paddingTop: 55,
-      paddingBottom: 60,
-      backgroundColor:
-        '#ffffff',
-    },
+const styles = StyleSheet.create({
+  container: {
+    flexGrow: 1,
 
-    centered: {
-      flex: 1,
-      justifyContent:
-        'center',
-      alignItems:
-        'center',
-      backgroundColor:
-        '#ffffff',
-    },
+    padding: 24,
 
-    profileHeader: {
-      alignItems:
-        'center',
-    },
+    paddingTop: 55,
 
-    profileAvatar: {
-      width: 92,
-      height: 92,
-      borderRadius: 46,
-      backgroundColor:
-        '#eeeeee',
-    },
+    paddingBottom: 60,
 
-    avatarPlaceholder: {
-      width: 92,
-      height: 92,
-      borderRadius: 46,
-      backgroundColor:
-        '#eeeeee',
-      justifyContent:
-        'center',
-      alignItems:
-        'center',
-    },
+    backgroundColor: "#ffffff",
+  },
 
-    avatarText: {
-      fontSize: 34,
-      fontWeight: '700',
-    },
+  centered: {
+    flex: 1,
 
-    displayName: {
-      fontSize: 28,
-      fontWeight: '700',
-      textAlign: 'center',
-      marginTop: 14,
-    },
+    justifyContent: "center",
 
-    username: {
-      fontSize: 15,
-      textAlign: 'center',
-      marginTop: 3,
-      color: '#777777',
-    },
+    alignItems: "center",
 
-    bio: {
-      fontSize: 15,
-      textAlign: 'center',
-      marginTop: 12,
-      lineHeight: 21,
-      color: '#333333',
-      maxWidth: 320,
-    },
+    backgroundColor: "#ffffff",
+  },
 
-    followButton: {
-      minWidth: 120,
-      alignItems:
-        'center',
-      backgroundColor:
-        '#111111',
-      paddingHorizontal: 22,
-      paddingVertical: 10,
-      borderRadius: 10,
-      marginTop: 18,
-    },
+  profileHeader: {
+    alignItems: "center",
+  },
 
-    followButtonText: {
-      color: '#ffffff',
-      fontSize: 14,
-      fontWeight: '700',
-    },
+  profileAvatar: {
+    width: 92,
 
-    followingButton: {
-      backgroundColor:
-        '#ffffff',
-      borderWidth: 1,
-      borderColor:
-        '#cccccc',
-    },
+    height: 92,
 
-    followingButtonText: {
-      color: '#111111',
-    },
+    borderRadius: 46,
 
-    statsCard: {
-      flexDirection: 'row',
-      borderWidth: 1,
-      borderColor:
-        '#eeeeee',
-      borderRadius: 14,
-      marginTop: 28,
-      paddingVertical: 17,
-    },
+    backgroundColor: "#eeeeee",
+  },
 
-    stat: {
-      flex: 1,
-      alignItems:
-        'center',
-    },
+  avatarPlaceholder: {
+    width: 92,
 
-    statDivider: {
-      width: 1,
-      backgroundColor:
-        '#eeeeee',
-    },
+    height: 92,
 
-    statNumber: {
-      fontSize: 20,
-      fontWeight: '700',
-    },
+    borderRadius: 46,
 
-    statLabel: {
-      fontSize: 12,
-      marginTop: 4,
-      color: '#777777',
-    },
+    backgroundColor: "#eeeeee",
 
-    socialStats: {
-      flexDirection: 'row',
-      justifyContent:
-        'center',
-      marginTop: 14,
-      gap: 36,
-    },
+    justifyContent: "center",
 
-    socialStat: {
-      alignItems:
-        'center',
-      minWidth: 80,
-    },
+    alignItems: "center",
+  },
 
-    socialNumber: {
-      fontSize: 16,
-      fontWeight: '700',
-    },
+  avatarText: {
+    fontSize: 34,
 
-    socialLabel: {
-      fontSize: 13,
-      color: '#666666',
-      marginTop: 2,
-    },
+    fontWeight: "700",
+  },
 
-    section: {
-      marginTop: 32,
-    },
+  displayName: {
+    fontSize: 28,
 
-    sectionTitle: {
-      fontSize: 21,
-      fontWeight: '700',
-      marginBottom: 12,
-    },
+    fontWeight: "700",
 
-    featureGrid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 10,
-    },
+    textAlign: "center",
 
-    featureCard: {
-      width: '48%',
-      minHeight: 118,
-      borderWidth: 1,
-      borderColor:
-        '#eeeeee',
-      borderRadius: 14,
-      padding: 14,
-      justifyContent:
-        'flex-start',
-    },
+    marginTop: 14,
+  },
 
-    rankBadge: {
-      alignSelf:
-        'flex-start',
-      backgroundColor:
-        '#111111',
-      borderRadius: 7,
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-      marginBottom: 12,
-    },
+  username: {
+    fontSize: 15,
 
-    rankBadgeText: {
-      color: '#ffffff',
-      fontSize: 12,
-      fontWeight: '700',
-    },
+    textAlign: "center",
 
-    featureName: {
-      fontSize: 16,
-      fontWeight: '700',
-      lineHeight: 20,
-    },
+    marginTop: 3,
 
-    featureSubtext: {
-      fontSize: 12,
-      color: '#777777',
-      marginTop: 5,
-    },
+    color: "#777777",
+  },
 
-    emptyCard: {
-      borderWidth: 1,
-      borderColor:
-        '#eeeeee',
-      borderRadius: 12,
-      padding: 16,
-    },
+  cityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 8,
+    gap: 4,
+  },
+  cityPin: {
+    fontSize: 14,
+  },
+  cityText: {
+    color: "#666666",
+    fontSize: 14,
+    textAlign: "center",
+  },
+  bio: {
+    fontSize: 15,
 
-    emptyText: {
-      fontSize: 14,
-      color: '#777777',
-    },
+    textAlign: "center",
 
-    diaryCard: {
-      paddingVertical: 16,
-      borderBottomWidth: 1,
-      borderBottomColor:
-        '#eeeeee',
-    },
+    marginTop: 12,
 
-    diaryContentRow: {
-      flexDirection: 'row',
-      alignItems:
-        'flex-start',
-    },
+    lineHeight: 21,
 
-    diaryThumbnail: {
-      width: 88,
-      height: 88,
-      borderRadius: 12,
-      marginRight: 13,
-      backgroundColor:
-        '#eeeeee',
-    },
+    color: "#333333",
 
-    diaryMainContent: {
-      flex: 1,
-    },
+    maxWidth: 320,
+  },
 
-    diaryTopRow: {
-      flexDirection: 'row',
-      justifyContent:
-        'space-between',
-      alignItems:
-        'flex-start',
-    },
+  followButton: {
+    minWidth: 120,
 
-    diaryInfo: {
-      flex: 1,
-      paddingRight: 10,
-    },
+    alignItems: "center",
 
-    diaryRight: {
-      alignItems:
-        'flex-end',
-    },
+    backgroundColor: "#111111",
 
-    dishName: {
-      fontSize: 17,
-      fontWeight: '700',
-    },
+    paddingHorizontal: 22,
 
-    restaurantName: {
-      fontSize: 13,
-      color: '#666666',
-      marginTop: 3,
-    },
+    paddingVertical: 10,
 
-    rating: {
-      fontSize: 17,
-      fontWeight: '700',
-    },
+    borderRadius: 10,
 
-    dateText: {
-      fontSize: 11,
-      color: '#999999',
-      marginTop: 3,
-    },
+    marginTop: 18,
+  },
 
-    reviewText: {
-      fontSize: 14,
-      marginTop: 8,
-      lineHeight: 19,
-      color: '#333333',
-    },
+  followButtonText: {
+    color: "#ffffff",
 
-    viewReview: {
-      fontSize: 12,
-      color: '#777777',
-      fontWeight: '600',
-      marginTop: 7,
-    },
-  });
+    fontSize: 14,
+
+    fontWeight: "700",
+  },
+
+  followingButton: {
+    backgroundColor: "#ffffff",
+
+    borderWidth: 1,
+
+    borderColor: "#cccccc",
+  },
+
+  followingButtonText: {
+    color: "#111111",
+  },
+
+  statsCard: {
+    flexDirection: "row",
+
+    borderWidth: 1,
+
+    borderColor: "#eeeeee",
+
+    borderRadius: 14,
+
+    marginTop: 28,
+
+    paddingVertical: 17,
+  },
+
+  stat: {
+    flex: 1,
+
+    alignItems: "center",
+  },
+
+  statDivider: {
+    width: 1,
+
+    backgroundColor: "#eeeeee",
+  },
+
+  statNumber: {
+    fontSize: 20,
+
+    fontWeight: "700",
+  },
+
+  statLabel: {
+    fontSize: 12,
+
+    marginTop: 4,
+
+    color: "#777777",
+  },
+
+  socialStats: {
+    flexDirection: "row",
+
+    justifyContent: "center",
+
+    marginTop: 14,
+
+    gap: 36,
+  },
+
+  socialStat: {
+    alignItems: "center",
+
+    minWidth: 80,
+  },
+
+  socialNumber: {
+    fontSize: 16,
+
+    fontWeight: "700",
+  },
+
+  socialLabel: {
+    fontSize: 13,
+
+    color: "#666666",
+
+    marginTop: 2,
+  },
+
+  section: {
+    marginTop: 32,
+  },
+
+  sectionTitle: {
+    fontSize: 21,
+
+    fontWeight: "700",
+
+    marginBottom: 12,
+  },
+
+  featureGrid: {
+    flexDirection: "row",
+
+    flexWrap: "wrap",
+
+    gap: 10,
+  },
+
+  featureCard: {
+    width: "48%",
+
+    minHeight: 118,
+
+    borderWidth: 1,
+
+    borderColor: "#eeeeee",
+
+    borderRadius: 14,
+
+    padding: 14,
+
+    justifyContent: "flex-start",
+  },
+
+  rankBadge: {
+    alignSelf: "flex-start",
+
+    backgroundColor: "#111111",
+
+    borderRadius: 7,
+
+    paddingHorizontal: 8,
+
+    paddingVertical: 4,
+
+    marginBottom: 12,
+  },
+
+  rankBadgeText: {
+    color: "#ffffff",
+
+    fontSize: 12,
+
+    fontWeight: "700",
+  },
+
+  featureName: {
+    fontSize: 16,
+
+    fontWeight: "700",
+
+    lineHeight: 20,
+  },
+
+  featureSubtext: {
+    fontSize: 12,
+
+    color: "#777777",
+
+    marginTop: 5,
+  },
+
+  emptyCard: {
+    borderWidth: 1,
+
+    borderColor: "#eeeeee",
+
+    borderRadius: 12,
+
+    padding: 16,
+  },
+
+  emptyText: {
+    fontSize: 14,
+
+    color: "#777777",
+  },
+
+  diaryCard: {
+    paddingVertical: 16,
+
+    borderBottomWidth: 1,
+
+    borderBottomColor: "#eeeeee",
+  },
+
+  diaryContentRow: {
+    flexDirection: "row",
+
+    alignItems: "flex-start",
+  },
+
+  diaryThumbnail: {
+    width: 88,
+
+    height: 88,
+
+    borderRadius: 12,
+
+    marginRight: 13,
+
+    backgroundColor: "#eeeeee",
+  },
+
+  diaryMainContent: {
+    flex: 1,
+  },
+
+  diaryTopRow: {
+    flexDirection: "row",
+
+    justifyContent: "space-between",
+
+    alignItems: "flex-start",
+  },
+
+  diaryInfo: {
+    flex: 1,
+
+    paddingRight: 10,
+  },
+
+  diaryRight: {
+    alignItems: "flex-end",
+  },
+
+  dishName: {
+    fontSize: 17,
+
+    fontWeight: "700",
+  },
+
+  restaurantName: {
+    fontSize: 13,
+
+    color: "#666666",
+
+    marginTop: 3,
+  },
+
+  rating: {
+    fontSize: 17,
+
+    fontWeight: "700",
+  },
+
+  dateText: {
+    fontSize: 11,
+
+    color: "#999999",
+
+    marginTop: 3,
+  },
+
+  reviewText: {
+    fontSize: 14,
+
+    marginTop: 8,
+
+    lineHeight: 19,
+
+    color: "#333333",
+  },
+
+  viewReview: {
+    fontSize: 12,
+
+    color: "#777777",
+
+    fontWeight: "600",
+
+    marginTop: 7,
+  },
+});
