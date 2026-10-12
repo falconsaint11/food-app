@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 
+import { ListsSection } from '@/components/lists-section';
 import { supabase } from '@/lib/supabase';
 
 type PublicProfile = {
@@ -677,6 +678,11 @@ export default function UserProfileScreen() {
           </Text>
         </TouchableOpacity>
       </View>
+
+      <ListsSection
+        userId={id}
+        isOwner={currentUserId === id}
+      />
 
       <View
         style={styles.section}

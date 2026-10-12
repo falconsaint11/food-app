@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 
+import { AddToListButton } from '@/components/add-to-list-button';
 import { supabase } from '@/lib/supabase';
 
 type Restaurant = {
@@ -238,6 +239,8 @@ export default function RestaurantDetailScreen() {
             </Text>
           </View>
         </View>
+
+        <AddToListButton listType="restaurant" targetId={restaurant.id} />
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Menu</Text>

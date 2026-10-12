@@ -53,17 +53,6 @@ export default function AuthScreen() {
     Alert.alert('Success', 'You are signed in.');
   }
 
-  async function signOut() {
-    const { error } = await supabase.auth.signOut();
-
-    if (error) {
-      Alert.alert('Logout error', error.message);
-      return;
-    }
-
-    Alert.alert('Success', 'You are signed out.');
-  }
-
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -122,16 +111,6 @@ export default function AuthScreen() {
         >
           <Text style={styles.secondaryButtonText}>
             Create Account
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.signOutButton}
-          onPress={signOut}
-          disabled={loading}
-        >
-          <Text style={styles.signOutButtonText}>
-            Sign Out
           </Text>
         </TouchableOpacity>
       </View>
@@ -206,15 +185,5 @@ const styles = StyleSheet.create({
     color: '#111111',
     fontSize: 16,
     fontWeight: '600',
-  },
-  signOutButton: {
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  signOutButtonText: {
-    color: '#777777',
-    fontSize: 14,
-    fontWeight: '500',
   },
 });
