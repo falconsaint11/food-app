@@ -1,9 +1,13 @@
 import * as Location from 'expo-location';
+
 import { router, useFocusEffect } from 'expo-router';
+
 import { useCallback, useState } from 'react';
+
 import {
   ActivityIndicator,
   Alert,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,6 +24,7 @@ type UserResult = {
   id: string;
   username: string;
   display_name: string | null;
+  avatar_path: string | null;
 };
 
 type RestaurantResult = {
@@ -82,6 +87,7 @@ type ExploreReview = {
 
 export default function DiscoverScreen() {
   const [query, setQuery] = useState('');
+
   const [searchType, setSearchType] =
     useState<SearchType>('users');
 
@@ -160,6 +166,7 @@ export default function DiscoverScreen() {
         'Following load error:',
         error.message
       );
+
       return;
     }
 
@@ -248,6 +255,7 @@ export default function DiscoverScreen() {
       );
 
       setLocationAllowed(false);
+
       return null;
     }
   }
@@ -467,11 +475,9 @@ export default function DiscoverScreen() {
           restaurant.latitude,
         longitude:
           restaurant.longitude,
-
         averageRating:
           restaurant.totalRating /
           restaurant.reviewCount,
-
         reviewCount:
           restaurant.reviewCount,
       }));
@@ -488,11 +494,9 @@ export default function DiscoverScreen() {
           restaurant.latitude,
         longitude:
           restaurant.longitude,
-
         averageRating:
           restaurant.totalRating /
           restaurant.reviewCount,
-
         reviewCount:
           restaurant.reviewCount,
       }));
@@ -503,16 +507,12 @@ export default function DiscoverScreen() {
       ).map((dish) => ({
         id: dish.id,
         name: dish.name,
-
         restaurantName:
           dish.restaurantName,
-
         city: dish.city,
-
         averageRating:
           dish.totalRating /
           dish.reviewCount,
-
         reviewCount:
           dish.reviewCount,
       }));
@@ -726,7 +726,7 @@ export default function DiscoverScreen() {
         await supabase
           .from('profiles')
           .select(
-            'id, username, display_name'
+            'id, username, display_name, avatar_path'
           )
           .or(
             `username.ilike.%${searchText}%,display_name.ilike.%${searchText}%`
@@ -893,7 +893,6 @@ export default function DiscoverScreen() {
         .insert({
           follower_id:
             user.id,
-
           following_id:
             profileId,
         });
@@ -937,6 +936,17 @@ export default function DiscoverScreen() {
     return [city, state]
       .filter(Boolean)
       .join(', ');
+  }
+
+  function getProfilePhotoUrl(
+    path: string
+  ) {
+    const { data } =
+      supabase.storage
+        .from('profile-photos')
+        .getPublicUrl(path);
+
+    return data.publicUrl;
   }
 
   const isSearching =
@@ -1107,25 +1117,39 @@ export default function DiscoverScreen() {
                           }
                         }}
                       >
-                        <View
-                          style={
-                            styles.avatar
-                          }
-                        >
-                          <Text
+                        {user.avatar_path ? (
+                          <Image
+                            source={{
+                              uri: getProfilePhotoUrl(
+                                user.avatar_path
+                              ),
+                            }}
                             style={
-                              styles.avatarText
+                              styles.avatarImage
+                            }
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View
+                            style={
+                              styles.avatar
                             }
                           >
-                            {(
-                              user.display_name ||
-                              user.username ||
-                              'U'
-                            )
-                              .charAt(0)
-                              .toUpperCase()}
-                          </Text>
-                        </View>
+                            <Text
+                              style={
+                                styles.avatarText
+                              }
+                            >
+                              {(
+                                user.display_name ||
+                                user.username ||
+                                'U'
+                              )
+                                .charAt(0)
+                                .toUpperCase()}
+                            </Text>
+                          </View>
+                        )}
 
                         <View
                           style={
@@ -1856,16 +1880,19 @@ const styles = StyleSheet.create({
     paddingBottom: 60,
     backgroundColor: '#ffffff',
   },
+
   title: {
     fontSize: 30,
     fontWeight: '700',
   },
+
   subtitle: {
     fontSize: 16,
     color: '#666666',
     marginTop: 8,
     marginBottom: 20,
   },
+
   tabs: {
     flexDirection: 'row',
     backgroundColor: '#f3f3f3',
@@ -1873,23 +1900,28 @@ const styles = StyleSheet.create({
     padding: 4,
     marginBottom: 16,
   },
+
   tab: {
     flex: 1,
     paddingVertical: 10,
     alignItems: 'center',
     borderRadius: 8,
   },
+
   activeTab: {
     backgroundColor: '#111111',
   },
+
   tabText: {
     fontSize: 13,
     fontWeight: '600',
     color: '#666666',
   },
+
   activeTabText: {
     color: '#ffffff',
   },
+
   input: {
     borderWidth: 1,
     borderColor: '#cccccc',
@@ -1899,16 +1931,19 @@ const styles = StyleSheet.create({
     color: '#111111',
     marginBottom: 12,
   },
+
   statusText: {
     fontSize: 14,
     color: '#777777',
     marginBottom: 10,
   },
+
   noResults: {
     fontSize: 14,
     color: '#777777',
     marginTop: 8,
   },
+
   resultRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1916,12 +1951,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#eeeeee',
   },
+
   resultInfo: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     paddingRight: 14,
   },
+
   simpleResultRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1929,6 +1966,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#eeeeee',
   },
+
   avatar: {
     width: 42,
     height: 42,
@@ -1938,10 +1976,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
   },
+
+  avatarImage: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#eeeeee',
+    marginRight: 12,
+  },
+
   avatarText: {
     fontSize: 16,
     fontWeight: '700',
   },
+
   iconCircle: {
     width: 42,
     height: 42,
@@ -1951,75 +1999,93 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
   },
+
   iconText: {
     fontSize: 18,
   },
+
   textArea: {
     flex: 1,
   },
+
   primaryText: {
     fontSize: 16,
     fontWeight: '600',
   },
+
   secondaryText: {
     fontSize: 13,
     color: '#666666',
     marginTop: 3,
   },
+
   chevron: {
     fontSize: 24,
     color: '#999999',
     marginLeft: 10,
   },
+
   followButton: {
     backgroundColor: '#111111',
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 8,
   },
+
   followButtonText: {
     color: '#ffffff',
     fontSize: 14,
     fontWeight: '600',
   },
+
   followingButton: {
     backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: '#cccccc',
   },
+
   followingButtonText: {
     color: '#111111',
   },
+
   exploreArea: {
     marginTop: 18,
   },
+
   exploreTitle: {
     fontSize: 24,
     fontWeight: '700',
     marginBottom: 22,
   },
+
   exploreLoader: {
     marginTop: 20,
   },
+
   nearbyHeader: {
     marginBottom: 8,
   },
+
   trendingHeader: {
     marginTop: 30,
     marginBottom: 8,
   },
+
   sectionTitle: {
     fontSize: 19,
     fontWeight: '700',
     marginBottom: 3,
   },
+
   sectionSubtitle: {
     fontSize: 12,
     color: '#888888',
   },
+
   sectionSpacing: {
     marginTop: 30,
   },
+
   locationMessage: {
     borderWidth: 1,
     borderColor: '#eeeeee',
@@ -2027,16 +2093,19 @@ const styles = StyleSheet.create({
     padding: 14,
     marginTop: 8,
   },
+
   locationMessageTitle: {
     fontSize: 14,
     fontWeight: '700',
   },
+
   locationMessageText: {
     fontSize: 13,
     color: '#777777',
     marginTop: 4,
     lineHeight: 18,
   },
+
   rankingRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2044,37 +2113,45 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#eeeeee',
   },
+
   rankNumber: {
     width: 28,
     fontSize: 16,
     fontWeight: '700',
     color: '#777777',
   },
+
   rankingInfo: {
     flex: 1,
     paddingRight: 12,
   },
+
   rankingName: {
     fontSize: 16,
     fontWeight: '600',
   },
+
   rankingSubtext: {
     fontSize: 13,
     color: '#777777',
     marginTop: 3,
   },
+
   rankingRating: {
     fontSize: 15,
     fontWeight: '700',
   },
+
   nearbyRatingArea: {
     alignItems: 'flex-end',
   },
+
   nearbyReviewCount: {
     fontSize: 11,
     color: '#999999',
     marginTop: 3,
   },
+
   reviewCount: {
     fontSize: 13,
     color: '#666666',

@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,11 +18,21 @@ import {
   NotificationItem,
 } from '@/lib/notifications';
 
+import { supabase } from '@/lib/supabase';
+
+type AvatarMap = {
+  [userId: string]: string | null;
+};
+
 export default function ActivityScreen() {
   const [notifications, setNotifications] = useState<
     NotificationItem[]
   >([]);
+
+  const [avatarPaths, setAvatarPaths] = useState<AvatarMap>({});
+
   const [loading, setLoading] = useState(true);
+
   const [markingAll, setMarkingAll] = useState(false);
 
   useFocusEffect(
@@ -30,19 +41,72 @@ export default function ActivityScreen() {
     }, [])
   );
 
+  function getProfilePhotoUrl(path: string) {
+    const { data } = supabase.storage
+      .from('profile-photos')
+      .getPublicUrl(path);
+
+    return data.publicUrl;
+  }
+
   async function loadActivity() {
     setLoading(true);
 
     try {
       const data = await getNotifications();
+
       setNotifications(data);
+
+      const actorIds = [
+        ...new Set(
+          data
+            .map((item) => item.actorId)
+            .filter(Boolean)
+        ),
+      ];
+
+      if (actorIds.length === 0) {
+        setAvatarPaths({});
+        return;
+      }
+
+      const {
+        data: profileData,
+        error: profileError,
+      } = await supabase
+        .from('profiles')
+        .select('id, avatar_path')
+        .in('id', actorIds);
+
+      if (profileError) {
+        console.log(
+          'Could not load notification profile photos:',
+          profileError
+        );
+
+        setAvatarPaths({});
+
+        return;
+      }
+
+      const nextAvatarPaths: AvatarMap = {};
+
+      (profileData ?? []).forEach((profile) => {
+        nextAvatarPaths[profile.id] =
+          profile.avatar_path ?? null;
+      });
+
+      setAvatarPaths(nextAvatarPaths);
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
           : 'Could not load activity.';
 
-      Alert.alert('Activity error', message);
+      Alert.alert(
+        'Activity error',
+        message
+      );
     } finally {
       setLoading(false);
     }
@@ -53,17 +117,22 @@ export default function ActivityScreen() {
   ) {
     if (!item.isRead) {
       try {
-        await markNotificationRead(item.id);
+        await markNotificationRead(
+          item.id
+        );
 
-        setNotifications((current) =>
-          current.map((notification) =>
-            notification.id === item.id
-              ? {
-                  ...notification,
-                  isRead: true,
-                }
-              : notification
-          )
+        setNotifications(
+          (current) =>
+            current.map(
+              (notification) =>
+                notification.id ===
+                item.id
+                  ? {
+                      ...notification,
+                      isRead: true,
+                    }
+                  : notification
+            )
         );
       } catch (error) {
         console.log(
@@ -96,8 +165,12 @@ export default function ActivityScreen() {
 
   async function handleMarkAllRead() {
     const unreadKeys = notifications
-      .filter((item) => !item.isRead)
-      .map((item) => item.id);
+      .filter(
+        (item) => !item.isRead
+      )
+      .map(
+        (item) => item.id
+      );
 
     if (unreadKeys.length === 0) {
       return;
@@ -106,13 +179,18 @@ export default function ActivityScreen() {
     setMarkingAll(true);
 
     try {
-      await markAllNotificationsRead(unreadKeys);
+      await markAllNotificationsRead(
+        unreadKeys
+      );
 
-      setNotifications((current) =>
-        current.map((item) => ({
-          ...item,
-          isRead: true,
-        }))
+      setNotifications(
+        (current) =>
+          current.map(
+            (item) => ({
+              ...item,
+              isRead: true,
+            })
+          )
       );
     } catch (error) {
       const message =
@@ -120,15 +198,23 @@ export default function ActivityScreen() {
           ? error.message
           : 'Could not mark notifications as read.';
 
-      Alert.alert('Error', message);
+      Alert.alert(
+        'Error',
+        message
+      );
     } finally {
       setMarkingAll(false);
     }
   }
 
-  function formatTimeAgo(date: string) {
+  function formatTimeAgo(
+    date: string
+  ) {
     const now = Date.now();
-    const then = new Date(date).getTime();
+
+    const then = new Date(
+      date
+    ).getTime();
 
     const seconds = Math.floor(
       (now - then) / 1000
@@ -162,7 +248,9 @@ export default function ActivityScreen() {
       return `${days}d`;
     }
 
-    return new Date(date).toLocaleDateString(
+    return new Date(
+      date
+    ).toLocaleDateString(
       undefined,
       {
         month: 'short',
@@ -174,11 +262,15 @@ export default function ActivityScreen() {
   function getNotificationText(
     item: NotificationItem
   ) {
-    if (item.type === 'follow') {
+    if (
+      item.type === 'follow'
+    ) {
       return 'started following you.';
     }
 
-    if (item.type === 'reaction') {
+    if (
+      item.type === 'reaction'
+    ) {
       return `reacted ${item.reaction} to your review of ${item.dishName}.`;
     }
 
@@ -188,134 +280,364 @@ export default function ActivityScreen() {
   function getNotificationIcon(
     item: NotificationItem
   ) {
-    if (item.type === 'follow') {
+    if (
+      item.type === 'follow'
+    ) {
       return '👤';
     }
 
-    if (item.type === 'reaction') {
-      return item.reaction ?? '❤️';
+    if (
+      item.type === 'reaction'
+    ) {
+      return (
+        item.reaction ??
+        '❤️'
+      );
     }
 
     return '💬';
   }
 
-  const unreadCount = notifications.filter(
-    (item) => !item.isRead
-  ).length;
+  function renderNotification(
+    item: NotificationItem
+  ) {
+    const avatarPath =
+      avatarPaths[item.actorId];
+
+    return (
+      <TouchableOpacity
+        key={item.id}
+        style={[
+          styles.notification,
+          !item.isRead &&
+            styles.unreadNotification,
+        ]}
+        activeOpacity={0.7}
+        onPress={() =>
+          openNotification(
+            item
+          )
+        }
+      >
+        {avatarPath ? (
+          <Image
+            source={{
+              uri: getProfilePhotoUrl(
+                avatarPath
+              ),
+            }}
+            style={
+              styles.avatarImage
+            }
+            resizeMode="cover"
+          />
+        ) : (
+          <View
+            style={
+              styles.avatar
+            }
+          >
+            <Text
+              style={
+                styles.avatarText
+              }
+            >
+              {item.actorName
+                .charAt(0)
+                .toUpperCase()}
+            </Text>
+          </View>
+        )}
+
+        <View
+          style={
+            styles.notificationBody
+          }
+        >
+          <View
+            style={
+              styles.notificationTopRow
+            }
+          >
+            <Text
+              style={[
+                styles.notificationText,
+                !item.isRead &&
+                  styles.unreadText,
+              ]}
+            >
+              <Text
+                style={
+                  styles.actorName
+                }
+              >
+                {item.actorName}
+              </Text>{' '}
+              {getNotificationText(
+                item
+              )}
+            </Text>
+
+            {!item.isRead ? (
+              <View
+                style={
+                  styles.unreadDot
+                }
+              />
+            ) : null}
+          </View>
+
+          {item.type ===
+            'comment' &&
+          item.commentText ? (
+            <View
+              style={
+                styles.commentPreviewBox
+              }
+            >
+              <Text
+                style={
+                  styles.commentPreview
+                }
+                numberOfLines={2}
+              >
+                “{item.commentText}”
+              </Text>
+            </View>
+          ) : null}
+
+          <Text
+            style={
+              styles.time
+            }
+          >
+            {formatTimeAgo(
+              item.createdAt
+            )}
+          </Text>
+        </View>
+
+        <View
+          style={
+            styles.iconArea
+          }
+        >
+          <Text
+            style={
+              styles.notificationIcon
+            }
+          >
+            {getNotificationIcon(
+              item
+            )}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  }
+
+  const unreadNotifications =
+    notifications.filter(
+      (item) =>
+        !item.isRead
+    );
+
+  const readNotifications =
+    notifications.filter(
+      (item) =>
+        item.isRead
+    );
+
+  const unreadCount =
+    unreadNotifications.length;
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" />
+      <View
+        style={
+          styles.centered
+        }
+      >
+        <ActivityIndicator
+          size="large"
+        />
       </View>
     );
   }
 
   return (
     <ScrollView
-      contentContainerStyle={styles.container}
+      contentContainerStyle={
+        styles.container
+      }
     >
-      <View style={styles.headerRow}>
-        <View style={styles.headerText}>
-          <Text style={styles.title}>
+      <View
+        style={
+          styles.headerRow
+        }
+      >
+        <View
+          style={
+            styles.headerText
+          }
+        >
+          <Text
+            style={
+              styles.title
+            }
+          >
             Activity
           </Text>
 
-          <Text style={styles.subtitle}>
-            Reactions, comments, and new followers.
+          <Text
+            style={
+              styles.subtitle
+            }
+          >
+            {unreadCount > 0
+              ? `${unreadCount} unread ${
+                  unreadCount === 1
+                    ? 'notification'
+                    : 'notifications'
+                }`
+              : 'You’re all caught up.'}
           </Text>
         </View>
 
         {unreadCount > 0 ? (
           <TouchableOpacity
-            onPress={handleMarkAllRead}
-            disabled={markingAll}
+            style={
+              styles.markAllButton
+            }
+            onPress={
+              handleMarkAllRead
+            }
+            disabled={
+              markingAll
+            }
           >
-            <Text style={styles.markAll}>
+            <Text
+              style={
+                styles.markAll
+              }
+            >
               {markingAll
-                ? '...'
+                ? 'Marking...'
                 : 'Mark all read'}
             </Text>
           </TouchableOpacity>
         ) : null}
       </View>
 
-      {notifications.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>
-            No notifications yet
+      {notifications.length ===
+      0 ? (
+        <View
+          style={
+            styles.emptyState
+          }
+        >
+          <View
+            style={
+              styles.emptyIcon
+            }
+          >
+            <Text
+              style={
+                styles.emptyIconText
+              }
+            >
+              🔔
+            </Text>
+          </View>
+
+          <Text
+            style={
+              styles.emptyTitle
+            }
+          >
+            No activity yet
           </Text>
 
-          <Text style={styles.emptyText}>
-            When people follow you, react to your
-            reviews, or leave comments, you&apos;ll
-            see it here.
+          <Text
+            style={
+              styles.emptyText
+            }
+          >
+            When people follow you,
+            react to your reviews, or
+            leave comments, you’ll see
+            it here.
           </Text>
         </View>
       ) : (
-        notifications.map((item) => (
-          <TouchableOpacity
-            key={item.id}
-            style={[
-              styles.notification,
-              !item.isRead &&
-                styles.unreadNotification,
-            ]}
-            activeOpacity={0.7}
-            onPress={() =>
-              openNotification(item)
-            }
-          >
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {item.actorName
-                  .charAt(0)
-                  .toUpperCase()}
-              </Text>
-            </View>
-
-            <View style={styles.notificationBody}>
-              <View style={styles.notificationTopRow}>
+        <>
+          {unreadNotifications.length >
+          0 ? (
+            <View
+              style={
+                styles.section
+              }
+            >
+              <View
+                style={
+                  styles.sectionHeader
+                }
+              >
                 <Text
-                  style={[
-                    styles.notificationText,
-                    !item.isRead &&
-                      styles.unreadText,
-                  ]}
+                  style={
+                    styles.sectionTitle
+                  }
                 >
-                  <Text style={styles.actorName}>
-                    {item.actorName}
-                  </Text>{' '}
-                  {getNotificationText(item)}
+                  New
                 </Text>
 
-                {!item.isRead ? (
-                  <View style={styles.unreadDot} />
-                ) : null}
+                <View
+                  style={
+                    styles.countBadge
+                  }
+                >
+                  <Text
+                    style={
+                      styles.countBadgeText
+                    }
+                  >
+                    {
+                      unreadNotifications.length
+                    }
+                  </Text>
+                </View>
               </View>
 
-              {item.type === 'comment' &&
-              item.commentText ? (
-                <Text
-                  style={styles.commentPreview}
-                  numberOfLines={2}
-                >
-                  &quot;{item.commentText}&quot;
-                </Text>
-              ) : null}
-
-              <Text style={styles.time}>
-                {formatTimeAgo(
-                  item.createdAt
-                )}
-              </Text>
+              {unreadNotifications.map(
+                renderNotification
+              )}
             </View>
+          ) : null}
 
-            <Text style={styles.notificationIcon}>
-              {getNotificationIcon(item)}
-            </Text>
-          </TouchableOpacity>
-        ))
+          {readNotifications.length >
+          0 ? (
+            <View
+              style={[
+                styles.section,
+                unreadNotifications.length >
+                  0 &&
+                  styles.olderSection,
+              ]}
+            >
+              <Text
+                style={
+                  styles.sectionTitle
+                }
+              >
+                Earlier
+              </Text>
+
+              {readNotifications.map(
+                renderNotification
+              )}
+            </View>
+          ) : null}
+        </>
       )}
     </ScrollView>
   );
@@ -326,101 +648,194 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: 24,
     paddingTop: 70,
-    paddingBottom: 40,
+    paddingBottom: 50,
     backgroundColor: '#ffffff',
   },
+
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#ffffff',
   },
+
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 24,
+    marginBottom: 26,
   },
+
   headerText: {
     flex: 1,
-    paddingRight: 12,
+    paddingRight: 14,
   },
+
   title: {
     fontSize: 30,
     fontWeight: '700',
   },
+
   subtitle: {
-    fontSize: 16,
-    color: '#666666',
-    marginTop: 8,
+    fontSize: 14,
+    color: '#777777',
+    marginTop: 5,
   },
+
+  markAllButton: {
+    borderWidth: 1,
+    borderColor: '#dddddd',
+    borderRadius: 9,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    marginTop: 2,
+  },
+
   markAll: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
-    marginTop: 10,
+    color: '#333333',
   },
+
+  section: {
+    marginTop: 2,
+  },
+
+  olderSection: {
+    marginTop: 30,
+  },
+
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+
+  countBadge: {
+    minWidth: 22,
+    height: 22,
+    paddingHorizontal: 6,
+    borderRadius: 11,
+    backgroundColor: '#111111',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+
+  countBadgeText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
   emptyState: {
-    marginTop: 20,
-    padding: 20,
+    marginTop: 16,
+    alignItems: 'center',
+    paddingVertical: 34,
+    paddingHorizontal: 24,
     borderWidth: 1,
     borderColor: '#eeeeee',
-    borderRadius: 12,
+    borderRadius: 16,
   },
+
+  emptyIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: '#f3f3f3',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+
+  emptyIconText: {
+    fontSize: 23,
+  },
+
   emptyTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '700',
   },
+
   emptyText: {
-    fontSize: 15,
+    fontSize: 14,
     color: '#777777',
     marginTop: 6,
-    lineHeight: 21,
+    lineHeight: 20,
+    textAlign: 'center',
+    maxWidth: 300,
   },
+
   notification: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingVertical: 16,
-    paddingHorizontal: 10,
-    marginHorizontal: -10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
+    paddingVertical: 15,
+    paddingHorizontal: 12,
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: '#eeeeee',
+    borderRadius: 14,
+    backgroundColor: '#ffffff',
   },
+
   unreadNotification: {
     backgroundColor: '#f7f7f7',
+    borderColor: '#dddddd',
   },
+
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: '#eeeeee',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
+
+  avatarImage: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#eeeeee',
+    marginRight: 12,
+  },
+
   avatarText: {
     fontSize: 17,
     fontWeight: '700',
   },
+
   notificationBody: {
     flex: 1,
-    paddingRight: 10,
+    paddingRight: 8,
   },
+
   notificationTopRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
   },
+
   notificationText: {
     flex: 1,
-    fontSize: 15,
-    lineHeight: 21,
-    color: '#222222',
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#333333',
   },
+
   unreadText: {
-    fontWeight: '500',
+    color: '#111111',
   },
+
   actorName: {
     fontWeight: '700',
   },
+
   unreadDot: {
     width: 8,
     height: 8,
@@ -429,19 +844,34 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     marginTop: 6,
   },
+
+  commentPreviewBox: {
+    marginTop: 7,
+    backgroundColor: '#ffffff',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+
   commentPreview: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#666666',
-    marginTop: 5,
-    lineHeight: 19,
+    lineHeight: 18,
   },
+
   time: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#999999',
-    marginTop: 6,
+    marginTop: 7,
   },
+
+  iconArea: {
+    width: 30,
+    alignItems: 'center',
+    paddingTop: 1,
+  },
+
   notificationIcon: {
-    fontSize: 20,
-    marginTop: 2,
+    fontSize: 19,
   },
 });
