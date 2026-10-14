@@ -11,6 +11,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+
+import { ListsSection } from "@/components/lists-section";
+import { supabase } from "@/lib/supabase";
+
 type Profile = {
   id: string;
   username: string;
@@ -238,6 +242,24 @@ export default function ProfileScreen() {
     const { data } = supabase.storage.from("profile-photos").getPublicUrl(path);
     return data.publicUrl;
   }
+
+  function confirmSignOut() {
+    Alert.alert("Sign out", "Are you sure you want to sign out?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Sign Out",
+        style: "destructive",
+        onPress: async () => {
+          const { error } = await supabase.auth.signOut();
+
+          if (error) {
+            Alert.alert("Sign out error", error.message);
+          }
+        },
+      },
+    ]);
+  }
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -257,6 +279,13 @@ export default function ProfileScreen() {
           onPress={() => router.push("/create-profile")}
         >
           <Text style={styles.createProfileButtonText}>Create Profile</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.signOutButton}
+          onPress={confirmSignOut}
+        >
+          <Text style={styles.signOutText}>Sign Out</Text>
         </TouchableOpacity>
       </View>
     );
@@ -301,16 +330,10 @@ export default function ProfileScreen() {
             <Text style={styles.editButtonText}>Edit Profile</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.switchAccountButton}
-            onPress={async () => {
-              const { error } = await supabase.auth.signOut();
-              if (error) {
-                Alert.alert("Sign out error", error.message);
-                return;
-              }
-            }}
+            style={styles.signOutButton}
+            onPress={confirmSignOut}
           >
-            <Text style={styles.switchAccountText}>Switch Account</Text>
+            <Text style={styles.signOutText}>Sign Out</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -362,6 +385,9 @@ export default function ProfileScreen() {
           <Text style={styles.socialLabel}>Following</Text>
         </TouchableOpacity>
       </View>
+
+      <ListsSection userId={profile.id} isOwner />
+
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Top Dishes</Text>
@@ -632,13 +658,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
   },
-  switchAccountButton: {
+
+  signOutButton: {
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
-  switchAccountText: {
+
+  signOutText: {
     fontSize: 14,
-    color: "#666666",
+    color: "#d32f2f",
     fontWeight: "600",
   },
   statsCard: {

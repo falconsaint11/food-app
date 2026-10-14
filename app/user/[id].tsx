@@ -13,7 +13,8 @@ import {
   View,
 } from "react-native";
 
-import { supabase } from "@/lib/supabase";
+import { ListsSection } from '@/components/lists-section';
+import { supabase } from '@/lib/supabase';
 
 type PublicProfile = {
   id: string;
@@ -649,8 +650,21 @@ export default function UserProfileScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Top Dishes</Text>
+      <ListsSection
+        userId={id}
+        isOwner={currentUserId === id}
+      />
+
+      <View
+        style={styles.section}
+      >
+        <Text
+          style={
+            styles.sectionTitle
+          }
+        >
+          Top Dishes
+        </Text>
 
         {topDishes.length === 0 ? (
           <View style={styles.emptyCard}>

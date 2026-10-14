@@ -10,6 +10,7 @@ import {
     View,
 } from 'react-native';
 
+import { AddToListButton } from '@/components/add-to-list-button';
 import { supabase } from '@/lib/supabase';
 
 type Dish = {
@@ -184,6 +185,8 @@ export default function DishDetailScreen() {
           </Text>
         </TouchableOpacity>
       ) : null}
+
+      <AddToListButton listType="dish" targetId={dish.id} />
 
       <View style={styles.statsCard}>
         <View style={styles.stat}>
