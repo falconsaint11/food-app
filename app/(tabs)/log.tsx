@@ -1,7 +1,9 @@
 import * as ImagePicker from "expo-image-picker";
+import { useFocusEffect } from "expo-router";
+
 import * as Location from "expo-location";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   ActivityIndicator,
@@ -21,30 +23,41 @@ import { supabase } from "@/lib/supabase";
 
 type RestaurantResult = {
   id: string;
+
   name: string;
+
   city: string | null;
+
   state: string | null;
+
   latitude: number | null;
+
   longitude: number | null;
+
   address: string | null;
+
   google_place_id: string | null;
 };
 
 type DishResult = {
   id: string;
+
   name: string;
 };
 
 type GooglePlaceSuggestion = {
   placePrediction?: {
     placeId?: string;
+
     text?: {
       text?: string;
     };
+
     structuredFormat?: {
       mainText?: {
         text?: string;
       };
+
       secondaryText?: {
         text?: string;
       };
@@ -54,12 +67,24 @@ type GooglePlaceSuggestion = {
 
 type GooglePlaceDetails = {
   google_place_id: string;
+
   name: string;
+
   address: string | null;
+
   city: string | null;
+
   state: string | null;
+
   latitude: number | null;
+
   longitude: number | null;
+};
+
+type TaggableFriend = {
+  id: string;
+  username: string;
+  display_name: string | null;
 };
 
 export default function LogScreen() {
@@ -84,9 +109,11 @@ export default function LogScreen() {
   const [address, setAddress] = useState("");
 
   const [city, setCity] = useState("");
+
   const [state, setState] = useState("");
 
   const [latitude, setLatitude] = useState<number | null>(null);
+
   const [longitude, setLongitude] = useState<number | null>(null);
 
   const [searchLatitude, setSearchLatitude] = useState<number | null>(null);
@@ -104,11 +131,16 @@ export default function LogScreen() {
   const [rating, setRating] = useState(0);
 
   const [ratingWidth, setRatingWidth] = useState(0);
+
   const [ratingLeftX, setRatingLeftX] = useState(0);
 
   const ratingRowRef = useRef<View>(null);
 
   const [reviewText, setReviewText] = useState("");
+  const [friends, setFriends] = useState<TaggableFriend[]>([]);
+  const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
+  const [friendSearch, setFriendSearch] = useState("");
+  const [friendsLoading, setFriendsLoading] = useState(true);
 
   const [photoUri, setPhotoUri] = useState<string | null>(null);
 
@@ -123,6 +155,7 @@ export default function LogScreen() {
   function createSessionToken() {
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
       /[xy]/g,
+
       (character) => {
         const random = Math.floor(Math.random() * 16);
 
@@ -136,6 +169,7 @@ export default function LogScreen() {
   function resetGoogleSession() {
     googleSessionToken.current = createSessionToken();
   }
+
   useEffect(() => {
     async function loadSearchLocation() {
       try {
@@ -157,6 +191,7 @@ export default function LogScreen() {
         });
 
         setSearchLatitude(location.coords.latitude);
+
         setSearchLongitude(location.coords.longitude);
       } catch (error) {
         console.log("Could not get location for restaurant search:", error);
@@ -165,12 +200,82 @@ export default function LogScreen() {
 
     loadSearchLocation();
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadMutualFollowers();
+    }, []),
+  );
+
+  async function loadMutualFollowers() {
+    setFriendsLoading(true);
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+      if (authError || !user) throw new Error("You must be signed in.");
+
+      const { data: following, error: followingError } = await supabase
+        .from("follows")
+        .select("following_id")
+        .eq("follower_id", user.id);
+      if (followingError) throw followingError;
+
+      const { data: followers, error: followersError } = await supabase
+        .from("follows")
+        .select("follower_id")
+        .eq("following_id", user.id);
+      if (followersError) throw followersError;
+
+      const followerIds = new Set(
+        (followers ?? []).map((row) => row.follower_id),
+      );
+      const mutualIds = (following ?? [])
+        .map((row) => row.following_id)
+        .filter((userId) => followerIds.has(userId));
+
+      if (mutualIds.length === 0) {
+        setFriends([]);
+        setSelectedFriends([]);
+        return;
+      }
+
+      const { data: profiles, error: profilesError } = await supabase
+        .from("profiles")
+        .select("id, username, display_name")
+        .in("id", mutualIds);
+      if (profilesError) throw profilesError;
+
+      const available = (profiles ?? []) as TaggableFriend[];
+      setFriends(available);
+      setSelectedFriends((current) =>
+        current.filter((id) => available.some((friend) => friend.id === id)),
+      );
+    } catch (error) {
+      console.log("Could not load mutual followers:", error);
+      Alert.alert("Friends error", "Could not load your mutual followers.");
+    } finally {
+      setFriendsLoading(false);
+    }
+  }
+
+  function toggleFriend(friendId: string) {
+    setSelectedFriends((current) =>
+      current.includes(friendId)
+        ? current.filter((id) => id !== friendId)
+        : [...current, friendId],
+    );
+  }
+
   async function searchGooglePlaces(text: string) {
     const trimmed = text.trim();
 
     if (trimmed.length < 3) {
       setGoogleResults([]);
+
       setGoogleLoading(false);
+
       return;
     }
 
@@ -179,11 +284,15 @@ export default function LogScreen() {
     try {
       const { data, error } = await supabase.functions.invoke(
         "google-places-autocomplete",
+
         {
           body: {
             input: trimmed,
+
             sessionToken: googleSessionToken.current,
+
             latitude: searchLatitude,
+
             longitude: searchLongitude,
           },
         },
@@ -193,6 +302,7 @@ export default function LogScreen() {
         console.log("Google autocomplete function error:", error.message);
 
         setGoogleResults([]);
+
         return;
       }
 
@@ -214,16 +324,23 @@ export default function LogScreen() {
     setRestaurantName(text);
 
     setSelectedRestaurantId(null);
+
     setGooglePlaceId(null);
+
     setAddress("");
 
     setCity("");
+
     setState("");
+
     setLatitude(null);
+
     setLongitude(null);
 
     setDishName("");
+
     setSelectedDishId(null);
+
     setDishResults([]);
 
     const trimmed = text.trim();
@@ -234,26 +351,42 @@ export default function LogScreen() {
 
     if (trimmed.length < 2) {
       setRestaurantResults([]);
+
       setGoogleResults([]);
+
       setGoogleLoading(false);
+
       return;
     }
 
     const { data, error } = await supabase
+
       .from("restaurants")
+
       .select(
         `
+
         id,
+
         name,
+
         city,
+
         state,
+
         latitude,
+
         longitude,
+
         address,
+
         google_place_id
+
       `,
       )
+
       .ilike("name", `%${trimmed}%`)
+
       .limit(8);
 
     if (error) {
@@ -270,6 +403,7 @@ export default function LogScreen() {
       }, 350);
     } else {
       setGoogleResults([]);
+
       setGoogleLoading(false);
     }
   }
@@ -282,6 +416,7 @@ export default function LogScreen() {
     setRestaurantName(restaurant.name);
 
     setCity(restaurant.city ?? "");
+
     setState(restaurant.state ?? "");
 
     setAddress(restaurant.address ?? "");
@@ -299,11 +434,15 @@ export default function LogScreen() {
     setSelectedRestaurantId(restaurant.id);
 
     setRestaurantResults([]);
+
     setGoogleResults([]);
+
     setGoogleLoading(false);
 
     setDishName("");
+
     setSelectedDishId(null);
+
     setDishResults([]);
   }
 
@@ -313,6 +452,7 @@ export default function LogScreen() {
     if (!placeId) {
       Alert.alert(
         "Google Places error",
+
         "This restaurant result did not include a place ID.",
       );
 
@@ -328,9 +468,11 @@ export default function LogScreen() {
     try {
       const { data, error } = await supabase.functions.invoke(
         "google-place-details",
+
         {
           body: {
             placeId,
+
             sessionToken: googleSessionToken.current,
           },
         },
@@ -347,20 +489,33 @@ export default function LogScreen() {
       }
 
       const { data: existingRestaurant, error: existingError } = await supabase
+
         .from("restaurants")
+
         .select(
           `
+
             id,
+
             name,
+
             city,
+
             state,
+
             latitude,
+
             longitude,
+
             address,
+
             google_place_id
+
           `,
         )
+
         .eq("google_place_id", details.google_place_id)
+
         .maybeSingle();
 
       if (existingError) {
@@ -369,16 +524,20 @@ export default function LogScreen() {
 
       if (existingRestaurant) {
         selectRestaurant(existingRestaurant as RestaurantResult);
+
         resetGoogleSession();
+
         return;
       }
 
       setRestaurantName(details.name);
+
       setGooglePlaceId(details.google_place_id);
 
       setAddress(details.address ?? "");
 
       setCity(details.city ?? "");
+
       setState(details.state ?? "");
 
       setLatitude(details.latitude !== null ? Number(details.latitude) : null);
@@ -390,10 +549,13 @@ export default function LogScreen() {
       setSelectedRestaurantId(null);
 
       setRestaurantResults([]);
+
       setGoogleResults([]);
 
       setDishName("");
+
       setSelectedDishId(null);
+
       setDishResults([]);
 
       resetGoogleSession();
@@ -413,6 +575,7 @@ export default function LogScreen() {
     if (selectedRestaurantId) {
       Alert.alert(
         "Existing restaurant",
+
         "Location is already tied to this restaurant record.",
       );
 
@@ -421,14 +584,19 @@ export default function LogScreen() {
 
     Alert.alert(
       "Use current location?",
+
       "Only use this if you are currently at the restaurant.",
+
       [
         {
           text: "Cancel",
+
           style: "cancel",
         },
+
         {
           text: "Use Location",
+
           onPress: getCurrentLocation,
         },
       ],
@@ -444,6 +612,7 @@ export default function LogScreen() {
       if (!permission.granted) {
         Alert.alert(
           "Location permission needed",
+
           "Allow location access if you want to save this restaurant's location.",
         );
 
@@ -455,6 +624,7 @@ export default function LogScreen() {
       });
 
       setLatitude(location.coords.latitude);
+
       setLongitude(location.coords.longitude);
     } catch (error) {
       const message =
@@ -468,30 +638,39 @@ export default function LogScreen() {
 
   function removeLocation() {
     setLatitude(null);
+
     setLongitude(null);
   }
 
   async function searchDishes(text: string) {
     setDishName(text);
+
     setSelectedDishId(null);
 
     const trimmed = text.trim();
 
     if (trimmed.length < 2) {
       setDishResults([]);
+
       return;
     }
 
     if (!selectedRestaurantId) {
       setDishResults([]);
+
       return;
     }
 
     const { data, error } = await supabase
+
       .from("dishes")
+
       .select("id, name")
+
       .eq("restaurant_id", selectedRestaurantId)
+
       .ilike("name", `%${trimmed}%`)
+
       .limit(8);
 
     if (error) {
@@ -505,7 +684,9 @@ export default function LogScreen() {
 
   function selectDish(dish: DishResult) {
     setDishName(dish.name);
+
     setSelectedDishId(dish.id);
+
     setDishResults([]);
   }
 
@@ -515,6 +696,7 @@ export default function LogScreen() {
     if (!permission.granted) {
       Alert.alert(
         "Photo permission needed",
+
         "Allow photo access to add a photo to your review.",
       );
 
@@ -523,8 +705,11 @@ export default function LogScreen() {
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
+
       allowsEditing: true,
+
       aspect: [4, 3],
+
       quality: 0.8,
     });
 
@@ -551,7 +736,9 @@ export default function LogScreen() {
           : "image/jpeg";
 
     const filePath = `${userId}/${Date.now()}-${Math.random()
+
       .toString(36)
+
       .slice(2)}.${extension}`;
 
     const response = await fetch(uri);
@@ -559,9 +746,12 @@ export default function LogScreen() {
     const arrayBuffer = await response.arrayBuffer();
 
     const { error } = await supabase.storage
+
       .from("review-photos")
+
       .upload(filePath, arrayBuffer, {
         contentType,
+
         upsert: false,
       });
 
@@ -578,15 +768,22 @@ export default function LogScreen() {
     }
 
     const trimmedName = restaurantName.trim();
+
     const trimmedCity = city.trim();
+
     const trimmedState = state.trim();
+
     const trimmedAddress = address.trim();
 
     if (googlePlaceId) {
       const { data: googleMatch, error: googleMatchError } = await supabase
+
         .from("restaurants")
+
         .select("id")
+
         .eq("google_place_id", googlePlaceId)
+
         .maybeSingle();
 
       if (googleMatchError) {
@@ -599,8 +796,11 @@ export default function LogScreen() {
     }
 
     let exactQuery = supabase
+
       .from("restaurants")
+
       .select("id, name, city, state")
+
       .ilike("name", trimmedName);
 
     exactQuery = exactQuery.ilike("city", trimmedCity);
@@ -618,17 +818,27 @@ export default function LogScreen() {
     }
 
     const { data: newRestaurant, error: insertError } = await supabase
+
       .from("restaurants")
+
       .insert({
         name: trimmedName,
+
         city: trimmedCity,
+
         state: trimmedState,
+
         address: trimmedAddress || null,
+
         latitude,
+
         longitude,
+
         google_place_id: googlePlaceId,
       })
+
       .select("id")
+
       .single();
 
     if (insertError || !newRestaurant) {
@@ -646,10 +856,15 @@ export default function LogScreen() {
     const trimmedDishName = dishName.trim();
 
     const { data: exactMatches, error: exactError } = await supabase
+
       .from("dishes")
+
       .select("id, name")
+
       .eq("restaurant_id", restaurantId)
+
       .ilike("name", trimmedDishName)
+
       .limit(1);
 
     if (exactError) {
@@ -661,12 +876,17 @@ export default function LogScreen() {
     }
 
     const { data: newDish, error: insertError } = await supabase
+
       .from("dishes")
+
       .insert({
         restaurant_id: restaurantId,
+
         name: trimmedDishName,
       })
+
       .select("id")
+
       .single();
 
     if (insertError || !newDish) {
@@ -679,26 +899,31 @@ export default function LogScreen() {
   async function logDish() {
     if (!restaurantName.trim()) {
       Alert.alert("Missing restaurant", "Enter a restaurant name.");
+
       return;
     }
 
     if (!selectedRestaurantId && !city.trim()) {
       Alert.alert("Missing city", "Enter the city for this new restaurant.");
+
       return;
     }
 
     if (!selectedRestaurantId && !state.trim()) {
       Alert.alert("Missing state", "Enter the state for this new restaurant.");
+
       return;
     }
 
     if (!dishName.trim()) {
       Alert.alert("Missing dish", "Enter a dish name.");
+
       return;
     }
 
     if (rating < 0.5 || rating > 5) {
       Alert.alert("Missing rating", "Choose a rating before logging the dish.");
+
       return;
     }
 
@@ -706,6 +931,7 @@ export default function LogScreen() {
 
     const {
       data: { user },
+
       error: userError,
     } = await supabase.auth.getUser();
 
@@ -728,47 +954,90 @@ export default function LogScreen() {
         uploadedPhotoPath = await uploadPhoto(photoUri, user.id);
       }
 
-      const { error: reviewError } = await supabase.from("reviews").insert({
-        user_id: user.id,
-        dish_id: dishId,
-        rating,
-        review_text: reviewText.trim() || null,
-        photo_path: uploadedPhotoPath,
-      });
+      const { data: createdReview, error: reviewError } = await supabase
+        .from("reviews")
+        .insert({
+          user_id: user.id,
+          dish_id: dishId,
+          rating,
+          review_text: reviewText.trim() || null,
+          photo_path: uploadedPhotoPath,
+        })
+        .select("id")
+        .single();
 
       if (reviewError) {
         if (uploadedPhotoPath) {
           await supabase.storage
+
             .from("review-photos")
+
             .remove([uploadedPhotoPath]);
         }
 
         throw new Error(reviewError.message);
       }
 
-      Alert.alert("Logged!", `${dishName.trim()} was added to your diary.`);
+      if (!createdReview) {
+        throw new Error("Review was saved but its ID was not returned.");
+      }
+
+      // Review creation and tag creation are separate requests. If tagging fails,
+      // keep the successfully created review and tell the user what happened.
+      let tagsSaved = true;
+      if (selectedFriends.length > 0) {
+        const { error: tagsError } = await supabase.from("review_tags").insert(
+          selectedFriends.map((friendId) => ({
+            review_id: createdReview.id,
+            tagged_user_id: friendId,
+          })),
+        );
+        if (tagsError) {
+          console.log("Review tags error:", tagsError.message);
+          tagsSaved = false;
+        }
+      }
+
+      Alert.alert(
+        tagsSaved ? "Logged!" : "Logged, but tags failed",
+        tagsSaved
+          ? `${dishName.trim()} was added to your diary.`
+          : `${dishName.trim()} was added to your diary, but the friend tags could not be saved.`,
+      );
 
       setRestaurantName("");
+
       setRestaurantResults([]);
+
       setGoogleResults([]);
+
       setSelectedRestaurantId(null);
 
       setGooglePlaceId(null);
+
       setAddress("");
 
       setCity("");
+
       setState("");
 
       setLatitude(null);
+
       setLongitude(null);
 
       setDishName("");
+
       setDishResults([]);
+
       setSelectedDishId(null);
 
       setRating(0);
+
       setReviewText("");
+
       setPhotoUri(null);
+      setSelectedFriends([]);
+      setFriendSearch("");
 
       resetGoogleSession();
     } catch (error) {
@@ -794,6 +1063,7 @@ export default function LogScreen() {
 
     const snappedRating = Math.max(
       0.5,
+
       Math.min(5, Math.ceil(rawRating * 2) / 2),
     );
 
@@ -808,14 +1078,23 @@ export default function LogScreen() {
 
   function getRatingLabel(value: number) {
     if (value === 0.5) return "Horrible";
+
     if (value === 1) return "Awful";
+
     if (value === 1.5) return "Bad";
+
     if (value === 2) return "Below Average";
+
     if (value === 2.5) return "Mid";
+
     if (value === 3) return "Decent";
+
     if (value === 3.5) return "Good";
+
     if (value === 4) return "Great";
+
     if (value === 4.5) return "Amazing";
+
     if (value === 5) return "Perfection";
 
     return "Tap or drag to rate";
@@ -953,17 +1232,29 @@ export default function LogScreen() {
               style={styles.changeRestaurantButton}
               onPress={() => {
                 setRestaurantName("");
+
                 setGooglePlaceId(null);
+
                 setAddress("");
+
                 setCity("");
+
                 setState("");
+
                 setLatitude(null);
+
                 setLongitude(null);
+
                 setRestaurantResults([]);
+
                 setGoogleResults([]);
+
                 setDishName("");
+
                 setSelectedDishId(null);
+
                 setDishResults([]);
+
                 resetGoogleSession();
               }}
             >
@@ -988,6 +1279,7 @@ export default function LogScreen() {
             <TextInput
               style={[
                 styles.input,
+
                 selectedRestaurantId && styles.inputDisabled,
               ]}
               placeholder="City"
@@ -1002,6 +1294,7 @@ export default function LogScreen() {
             <TextInput
               style={[
                 styles.input,
+
                 selectedRestaurantId && styles.inputDisabled,
               ]}
               placeholder="State, e.g. AZ"
@@ -1079,6 +1372,7 @@ export default function LogScreen() {
         <TextInput
           style={[
             styles.input,
+
             !selectedRestaurantId && styles.inputNeedsRestaurant,
           ]}
           placeholder={
@@ -1168,6 +1462,7 @@ export default function LogScreen() {
                   <View
                     style={[
                       styles.starFillClip,
+
                       {
                         width: fillWidth,
                       },
@@ -1202,6 +1497,62 @@ export default function LogScreen() {
           value={reviewText}
           onChangeText={setReviewText}
         />
+
+        <Text style={styles.label}>Who'd you go with? (Optional)</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Search your mutual followers..."
+          placeholderTextColor="#888888"
+          value={friendSearch}
+          onChangeText={setFriendSearch}
+        />
+
+        {friendsLoading ? (
+          <ActivityIndicator size="small" style={styles.friendsLoading} />
+        ) : friends.length === 0 ? (
+          <Text style={styles.friendsHelper}>No mutual followers yet.</Text>
+        ) : (
+          <View style={styles.friendsList}>
+            {friends
+              .filter((friend) =>
+                `${friend.username} ${friend.display_name ?? ""}`
+                  .toLowerCase()
+                  .includes(friendSearch.trim().toLowerCase()),
+              )
+              .map((friend) => {
+                const selected = selectedFriends.includes(friend.id);
+                return (
+                  <TouchableOpacity
+                    key={friend.id}
+                    style={[
+                      styles.friendRow,
+                      selected && styles.friendSelected,
+                    ]}
+                    onPress={() => toggleFriend(friend.id)}
+                    disabled={loading}
+                  >
+                    <View>
+                      <Text style={styles.friendName}>
+                        {friend.display_name || friend.username}
+                      </Text>
+                      <Text style={styles.friendHandle}>
+                        @{friend.username}
+                      </Text>
+                    </View>
+                    <Text style={styles.friendCheck}>
+                      {selected ? "✓" : "+"}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+          </View>
+        )}
+
+        {selectedFriends.length > 0 ? (
+          <Text style={styles.friendsHelper}>
+            {selectedFriends.length} friend(s) selected
+          </Text>
+        ) : null}
 
         <Text style={styles.label}>Photo</Text>
 
@@ -1267,43 +1618,61 @@ const styles = StyleSheet.create({
 
   container: {
     flexGrow: 1,
+
     padding: 24,
+
     paddingTop: 70,
+
     paddingBottom: 40,
+
     backgroundColor: "#ffffff",
   },
 
   title: {
     fontSize: 30,
+
     fontWeight: "700",
   },
 
   subtitle: {
     fontSize: 16,
+
     color: "#666666",
+
     marginTop: 8,
+
     marginBottom: 30,
   },
 
   label: {
     fontSize: 14,
+
     fontWeight: "600",
+
     marginBottom: 6,
   },
 
   input: {
     borderWidth: 1,
+
     borderColor: "#cccccc",
+
     borderRadius: 10,
+
     padding: 14,
+
     fontSize: 16,
+
     color: "#111111",
+
     marginBottom: 12,
+
     backgroundColor: "#ffffff",
   },
 
   inputDisabled: {
     backgroundColor: "#f5f5f5",
+
     color: "#666666",
   },
 
@@ -1313,114 +1682,163 @@ const styles = StyleSheet.create({
 
   resultsBox: {
     borderWidth: 1,
+
     borderColor: "#eeeeee",
+
     borderRadius: 10,
+
     marginBottom: 14,
+
     overflow: "hidden",
   },
 
   resultsLabel: {
     fontSize: 12,
+
     fontWeight: "700",
+
     color: "#777777",
+
     paddingHorizontal: 12,
+
     paddingTop: 10,
+
     paddingBottom: 6,
   },
 
   resultItem: {
     paddingHorizontal: 12,
+
     paddingVertical: 11,
+
     borderTopWidth: 1,
+
     borderTopColor: "#eeeeee",
   },
 
   resultName: {
     fontSize: 16,
+
     fontWeight: "600",
   },
 
   resultSubtext: {
     fontSize: 13,
+
     color: "#777777",
+
     marginTop: 2,
   },
 
   googleLoadingRow: {
     flexDirection: "row",
+
     alignItems: "center",
+
     marginBottom: 14,
+
     paddingVertical: 4,
   },
 
   googleLoadingText: {
     fontSize: 12,
+
     color: "#777777",
+
     marginLeft: 8,
   },
 
   selectedBox: {
     borderWidth: 1,
+
     borderColor: "#dddddd",
+
     borderRadius: 10,
+
     padding: 12,
+
     marginBottom: 16,
+
     backgroundColor: "#f7f7f7",
   },
 
   googleSelectedBox: {
     borderWidth: 1,
+
     borderColor: "#dddddd",
+
     borderRadius: 10,
+
     padding: 12,
+
     marginBottom: 16,
+
     backgroundColor: "#f7f7f7",
   },
 
   selectedTitle: {
     fontSize: 12,
+
     fontWeight: "700",
+
     color: "#555555",
   },
 
   selectedText: {
     fontSize: 14,
+
     fontWeight: "600",
+
     marginTop: 3,
   },
 
   selectedLocation: {
     fontSize: 12,
+
     color: "#777777",
+
     marginTop: 3,
   },
 
   newItemBox: {
     borderWidth: 1,
+
     borderColor: "#eeeeee",
+
     borderRadius: 10,
+
     padding: 12,
+
     marginBottom: 16,
   },
 
   newItemTitle: {
     fontSize: 12,
+
     fontWeight: "700",
+
     color: "#777777",
   },
 
   newItemText: {
     fontSize: 13,
+
     color: "#666666",
+
     lineHeight: 18,
+
     marginTop: 3,
   },
 
   helperText: {
     fontSize: 12,
+
     lineHeight: 17,
+
     color: "#777777",
+
     marginTop: -4,
+
     marginBottom: 14,
   },
 
@@ -1430,60 +1848,83 @@ const styles = StyleSheet.create({
 
   locationLabel: {
     fontSize: 14,
+
     fontWeight: "600",
   },
 
   locationHelper: {
     fontSize: 12,
+
     color: "#777777",
+
     lineHeight: 17,
+
     marginTop: 4,
+
     marginBottom: 10,
   },
 
   locationButton: {
     borderWidth: 1,
+
     borderColor: "#cccccc",
+
     borderRadius: 10,
+
     minHeight: 46,
+
     justifyContent: "center",
+
     alignItems: "center",
   },
 
   locationButtonText: {
     fontSize: 14,
+
     fontWeight: "700",
   },
 
   locationSavedBox: {
     flexDirection: "row",
+
     alignItems: "center",
+
     borderWidth: 1,
+
     borderColor: "#dddddd",
+
     borderRadius: 10,
+
     padding: 12,
+
     backgroundColor: "#f7f7f7",
   },
 
   locationSavedInfo: {
     flex: 1,
+
     paddingRight: 12,
   },
 
   locationSavedTitle: {
     fontSize: 13,
+
     fontWeight: "700",
   },
 
   locationSavedText: {
     fontSize: 12,
+
     color: "#777777",
+
     marginTop: 2,
   },
 
   removeLocationText: {
     fontSize: 12,
+
     color: "#b42318",
+
     fontWeight: "600",
   },
 
@@ -1493,101 +1934,141 @@ const styles = StyleSheet.create({
 
   ratingTouchArea: {
     flexDirection: "row",
+
     alignSelf: "flex-start",
+
     alignItems: "center",
+
     width: 250,
+
     height: 52,
   },
 
   starContainer: {
     width: 50,
+
     height: 52,
+
     position: "relative",
+
     justifyContent: "center",
   },
 
   star: {
     fontSize: 42,
+
     lineHeight: 48,
   },
 
   emptyStar: {
     color: "#d8d8d8",
+
     position: "absolute",
+
     left: 0,
+
     top: 2,
   },
 
   starFillClip: {
     position: "absolute",
+
     left: 0,
+
     top: 2,
+
     height: 48,
+
     overflow: "hidden",
   },
 
   filledStar: {
     color: "#111111",
+
     position: "absolute",
+
     left: 0,
+
     top: 0,
+
     width: 50,
   },
 
   dragHint: {
     fontSize: 12,
+
     color: "#888888",
+
     marginTop: 4,
   },
 
   ratingSummary: {
     marginTop: 12,
+
     flexDirection: "row",
+
     alignItems: "baseline",
   },
 
   ratingNumber: {
     fontSize: 26,
+
     fontWeight: "700",
+
     minWidth: 52,
   },
 
   ratingLabel: {
     fontSize: 16,
+
     fontWeight: "600",
+
     color: "#555555",
+
     marginLeft: 8,
   },
 
   reviewInput: {
     minHeight: 110,
+
     textAlignVertical: "top",
   },
 
   addPhotoButton: {
     flexDirection: "row",
+
     alignItems: "center",
+
     borderWidth: 1,
+
     borderColor: "#dddddd",
+
     borderRadius: 12,
+
     padding: 16,
+
     marginBottom: 22,
   },
 
   addPhotoIcon: {
     fontSize: 28,
+
     marginRight: 14,
+
     fontWeight: "300",
   },
 
   addPhotoTitle: {
     fontSize: 15,
+
     fontWeight: "700",
   },
 
   addPhotoSubtitle: {
     fontSize: 12,
+
     color: "#888888",
+
     marginTop: 2,
   },
 
@@ -1597,14 +2078,19 @@ const styles = StyleSheet.create({
 
   photoPreview: {
     width: "100%",
+
     aspectRatio: 4 / 3,
+
     borderRadius: 14,
+
     backgroundColor: "#eeeeee",
   },
 
   photoActions: {
     flexDirection: "row",
+
     marginTop: 10,
+
     gap: 16,
   },
 
@@ -1614,6 +2100,7 @@ const styles = StyleSheet.create({
 
   changePhotoText: {
     fontSize: 13,
+
     fontWeight: "700",
   },
 
@@ -1623,15 +2110,21 @@ const styles = StyleSheet.create({
 
   removePhotoText: {
     fontSize: 13,
+
     fontWeight: "600",
+
     color: "#b42318",
   },
 
   button: {
     backgroundColor: "#111111",
+
     padding: 16,
+
     borderRadius: 10,
+
     alignItems: "center",
+
     marginTop: 4,
   },
 
@@ -1641,18 +2134,64 @@ const styles = StyleSheet.create({
 
   buttonText: {
     color: "#ffffff",
+
     fontSize: 16,
+
     fontWeight: "600",
   },
+
   changeRestaurantButton: {
     marginTop: 10,
+
     alignSelf: "flex-start",
   },
 
   changeRestaurantText: {
     fontSize: 13,
+
     fontWeight: "600",
+
     color: "#555555",
+
     textDecorationLine: "underline",
+  },
+
+  friendsLoading: {
+    marginBottom: 12,
+  },
+  friendsList: {
+    marginBottom: 12,
+  },
+  friendRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#eeeeee",
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  friendSelected: {
+    backgroundColor: "#f2f2f2",
+    borderColor: "#111111",
+  },
+  friendName: {
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  friendHandle: {
+    fontSize: 13,
+    color: "#777777",
+    marginTop: 3,
+  },
+  friendCheck: {
+    fontSize: 20,
+    fontWeight: "700",
+  },
+  friendsHelper: {
+    fontSize: 13,
+    color: "#777777",
+    marginBottom: 15,
   },
 });
