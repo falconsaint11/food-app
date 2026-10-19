@@ -15,6 +15,7 @@ import {
 
 import { ListType } from '@/lib/lists';
 import { supabase } from '@/lib/supabase';
+import { Palette } from '@/constants/theme';
 
 export default function CreateListScreen() {
   const params = useLocalSearchParams<{
@@ -125,7 +126,7 @@ export default function CreateListScreen() {
         <TextInput
           style={styles.input}
           placeholder="Best tacos in town"
-          placeholderTextColor="#888888"
+          placeholderTextColor={Palette.textMuted}
           value={name}
           onChangeText={setName}
         />
@@ -135,7 +136,7 @@ export default function CreateListScreen() {
         <TextInput
           style={[styles.input, styles.multilineInput]}
           placeholder="What's this list about?"
-          placeholderTextColor="#888888"
+          placeholderTextColor={Palette.textMuted}
           multiline
           value={description}
           onChangeText={setDescription}
@@ -206,7 +207,7 @@ export default function CreateListScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   container: {
     padding: 24,
@@ -215,17 +216,17 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#222222',
+    color: Palette.text,
     marginBottom: 7,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#cccccc',
+    borderColor: Palette.borderStrong,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 14,
     fontSize: 16,
-    color: '#111111',
+    color: Palette.text,
     marginBottom: 18,
   },
   multilineInput: {
@@ -234,7 +235,7 @@ const styles = StyleSheet.create({
   },
   toggle: {
     flexDirection: 'row',
-    backgroundColor: '#f2f2f2',
+    backgroundColor: Palette.surface,
     borderRadius: 10,
     padding: 3,
   },
@@ -245,7 +246,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   toggleButtonActive: {
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   toggleButtonDisabled: {
     opacity: 0.4,
@@ -253,14 +254,14 @@ const styles = StyleSheet.create({
   toggleText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#777777',
+    color: Palette.textMuted,
   },
   toggleTextActive: {
-    color: '#111111',
+    color: Palette.accent,
   },
   hint: {
     fontSize: 13,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 6,
   },
   switchRow: {
@@ -274,20 +275,21 @@ const styles = StyleSheet.create({
     paddingRight: 16,
   },
   switchLabel: {
+    color: Palette.text,
     fontSize: 16,
     fontWeight: '600',
   },
   primaryButton: {
     paddingVertical: 16,
     borderRadius: 10,
-    backgroundColor: '#111111',
+    backgroundColor: Palette.accent,
     alignItems: 'center',
   },
   disabledButton: {
     opacity: 0.6,
   },
   primaryButtonText: {
-    color: '#ffffff',
+    color: Palette.text,
     fontSize: 16,
     fontWeight: '600',
   },

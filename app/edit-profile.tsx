@@ -16,6 +16,7 @@ import {
 } from "react-native";
 
 import { supabase } from "@/lib/supabase";
+import { Palette } from "@/constants/theme";
 
 export default function EditProfileScreen() {
   const [username, setUsername] = useState("");
@@ -319,7 +320,7 @@ export default function EditProfileScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <Text>Loading profile...</Text>
+        <Text style={{ color: Palette.textMuted }}>Loading profile...</Text>
       </View>
     );
   }
@@ -393,7 +394,7 @@ export default function EditProfileScreen() {
         <TextInput
           style={styles.input}
           placeholder="e.g. Boston, MA"
-          placeholderTextColor="#888888"
+          placeholderTextColor={Palette.textMuted}
           value={city}
           onChangeText={setCity}
           maxLength={100}
@@ -427,7 +428,7 @@ const styles = StyleSheet.create({
 
     padding: 24,
 
-    backgroundColor: "#ffffff",
+    backgroundColor: Palette.background,
   },
 
   centered: {
@@ -437,10 +438,11 @@ const styles = StyleSheet.create({
 
     alignItems: "center",
 
-    backgroundColor: "#ffffff",
+    backgroundColor: Palette.background,
   },
 
   title: {
+    color: Palette.text,
     fontSize: 30,
 
     fontWeight: "700",
@@ -471,7 +473,7 @@ const styles = StyleSheet.create({
 
     borderRadius: 55,
 
-    backgroundColor: "#eeeeee",
+    backgroundColor: Palette.elevated,
 
     alignItems: "center",
 
@@ -481,12 +483,14 @@ const styles = StyleSheet.create({
   },
 
   avatarFallbackText: {
+    color: Palette.text,
     fontSize: 38,
 
     fontWeight: "700",
   },
 
   changePhoto: {
+    color: Palette.text,
     fontSize: 15,
 
     fontWeight: "700",
@@ -497,12 +501,13 @@ const styles = StyleSheet.create({
   removePhoto: {
     fontSize: 13,
 
-    color: "#cc3333",
+    color: Palette.danger,
 
     marginTop: 8,
   },
 
   label: {
+    color: Palette.text,
     fontSize: 14,
 
     fontWeight: "600",
@@ -511,9 +516,10 @@ const styles = StyleSheet.create({
   },
 
   input: {
+    color: Palette.text,
     borderWidth: 1,
 
-    borderColor: "#cccccc",
+    borderColor: Palette.borderStrong,
 
     borderRadius: 10,
 
@@ -531,7 +537,7 @@ const styles = StyleSheet.create({
   },
 
   button: {
-    backgroundColor: "#111111",
+    backgroundColor: Palette.accent,
 
     borderRadius: 10,
 
@@ -543,7 +549,7 @@ const styles = StyleSheet.create({
   },
 
   buttonText: {
-    color: "#ffffff",
+    color: Palette.text,
 
     fontWeight: "600",
 

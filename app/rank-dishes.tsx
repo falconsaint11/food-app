@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
+import { Palette } from '@/constants/theme';
 
 type DishOption = {
   id: string;
@@ -244,37 +245,40 @@ const styles = StyleSheet.create({
     padding: 24,
     paddingTop: 70,
     paddingBottom: 40,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   title: {
+    color: Palette.text,
     fontSize: 30,
     fontWeight: '700',
   },
   subtitle: {
     fontSize: 16,
-    color: '#666666',
+    color: Palette.textSecondary,
     marginTop: 6,
     marginBottom: 24,
   },
   selectedBox: {
     padding: 16,
     borderWidth: 1,
-    borderColor: '#dddddd',
+    borderColor: Palette.borderStrong,
     borderRadius: 12,
     marginBottom: 20,
   },
   selectedTitle: {
+    color: Palette.text,
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 8,
   },
   selectedItem: {
+    color: Palette.text,
     fontSize: 15,
     marginTop: 4,
   },
@@ -284,37 +288,39 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
+    borderBottomColor: Palette.border,
   },
   dishCardSelected: {
-    backgroundColor: '#f7f7f7',
+    backgroundColor: Palette.surface,
   },
   dishInfo: {
     flex: 1,
     paddingRight: 16,
   },
   dishName: {
+    color: Palette.text,
     fontSize: 17,
     fontWeight: '600',
   },
   restaurantName: {
     fontSize: 14,
-    color: '#666666',
+    color: Palette.textSecondary,
     marginTop: 3,
   },
   rankNumber: {
+    color: Palette.text,
     fontSize: 17,
     fontWeight: '700',
   },
   button: {
-    backgroundColor: '#111111',
+    backgroundColor: Palette.accent,
     borderRadius: 10,
     padding: 16,
     alignItems: 'center',
     marginTop: 24,
   },
   buttonText: {
-    color: '#ffffff',
+    color: Palette.text,
     fontSize: 16,
     fontWeight: '600',
   },

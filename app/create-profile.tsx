@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
+import { Palette } from '@/constants/theme';
 
 export default function CreateProfileScreen() {
   const [username, setUsername] = useState('');
@@ -108,21 +109,24 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
     padding: 24,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   title: {
+    color: Palette.text,
     fontSize: 30,
     fontWeight: '700',
     marginBottom: 24,
   },
   label: {
+  color: Palette.text,
   fontSize: 14,
   fontWeight: '600',
   marginBottom: 6,
 },
   input: {
+    color: Palette.text,
     borderWidth: 1,
-    borderColor: '#cccccc',
+    borderColor: Palette.borderStrong,
     borderRadius: 10,
     padding: 14,
     fontSize: 16,
@@ -133,13 +137,13 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   button: {
-    backgroundColor: '#111111',
+    backgroundColor: Palette.accent,
     borderRadius: 10,
     padding: 16,
     alignItems: 'center',
   },
   buttonText: {
-    color: '#ffffff',
+    color: Palette.text,
     fontWeight: '600',
     fontSize: 16,
   },

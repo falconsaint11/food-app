@@ -17,6 +17,7 @@ import {
 } from "react-native";
 
 import { supabase } from "@/lib/supabase";
+import { Palette } from "@/constants/theme";
 
 type Review = {
   id: string;
@@ -901,7 +902,7 @@ export default function ReviewDetailScreen() {
             <TextInput
               style={styles.commentInput}
               placeholder="Add a comment..."
-              placeholderTextColor="#888888"
+              placeholderTextColor={Palette.textMuted}
               value={commentText}
               onChangeText={setCommentText}
               multiline
@@ -1000,7 +1001,7 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
 
-    backgroundColor: "#ffffff",
+    backgroundColor: Palette.background,
   },
 
   container: {
@@ -1012,7 +1013,7 @@ const styles = StyleSheet.create({
 
     paddingBottom: 60,
 
-    backgroundColor: "#ffffff",
+    backgroundColor: Palette.background,
   },
 
   centered: {
@@ -1022,13 +1023,13 @@ const styles = StyleSheet.create({
 
     alignItems: "center",
 
-    backgroundColor: "#ffffff",
+    backgroundColor: Palette.background,
   },
 
   notFound: {
     fontSize: 16,
 
-    color: "#666666",
+    color: Palette.textSecondary,
   },
 
   userRow: {
@@ -1046,7 +1047,7 @@ const styles = StyleSheet.create({
 
     borderRadius: 24,
 
-    backgroundColor: "#eeeeee",
+    backgroundColor: Palette.elevated,
 
     justifyContent: "center",
 
@@ -1056,6 +1057,7 @@ const styles = StyleSheet.create({
   },
 
   avatarText: {
+    color: Palette.text,
     fontSize: 19,
 
     fontWeight: "700",
@@ -1066,6 +1068,7 @@ const styles = StyleSheet.create({
   },
 
   userName: {
+    color: Palette.text,
     fontSize: 17,
 
     fontWeight: "700",
@@ -1074,7 +1077,7 @@ const styles = StyleSheet.create({
   userHandle: {
     fontSize: 14,
 
-    color: "#777777",
+    color: Palette.accent,
 
     marginTop: 2,
   },
@@ -1082,7 +1085,7 @@ const styles = StyleSheet.create({
   reviewCard: {
     borderWidth: 1,
 
-    borderColor: "#eeeeee",
+    borderColor: Palette.border,
 
     borderRadius: 16,
 
@@ -1106,12 +1109,14 @@ const styles = StyleSheet.create({
   },
 
   dishName: {
+    color: Palette.text,
     fontSize: 24,
 
     fontWeight: "700",
   },
 
   dishLink: {
+    color: Palette.text,
     fontSize: 24,
 
     fontWeight: "700",
@@ -1120,7 +1125,7 @@ const styles = StyleSheet.create({
   restaurantName: {
     fontSize: 15,
 
-    color: "#666666",
+    color: Palette.textSecondary,
 
     marginTop: 5,
   },
@@ -1128,7 +1133,7 @@ const styles = StyleSheet.create({
   restaurantLink: {
     fontSize: 15,
 
-    color: "#444444",
+    color: Palette.textBody,
 
     fontWeight: "600",
 
@@ -1136,6 +1141,7 @@ const styles = StyleSheet.create({
   },
 
   rating: {
+    color: Palette.accent,
     fontSize: 22,
 
     fontWeight: "700",
@@ -1150,10 +1156,11 @@ const styles = StyleSheet.create({
 
     marginTop: 20,
 
-    backgroundColor: "#eeeeee",
+    backgroundColor: Palette.elevated,
   },
 
   reviewText: {
+    color: Palette.text,
     fontSize: 17,
 
     lineHeight: 25,
@@ -1164,7 +1171,7 @@ const styles = StyleSheet.create({
   noReviewText: {
     fontSize: 15,
 
-    color: "#777777",
+    color: Palette.textMuted,
 
     fontStyle: "italic",
 
@@ -1179,7 +1186,7 @@ const styles = StyleSheet.create({
   },
   taggedFriendsLabel: {
     fontSize: 14,
-    color: "#666666",
+    color: Palette.textSecondary,
   },
   taggedFriendItem: {
     flexDirection: "row",
@@ -1187,13 +1194,13 @@ const styles = StyleSheet.create({
   },
   taggedFriendLink: {
     fontSize: 14,
-    color: "#111111",
+    color: Palette.accent,
     fontWeight: "700",
   },
   date: {
     fontSize: 13,
 
-    color: "#888888",
+    color: Palette.textMuted,
 
     marginTop: 24,
   },
@@ -1211,7 +1218,7 @@ const styles = StyleSheet.create({
 
     borderWidth: 1,
 
-    borderColor: "#111111",
+    borderColor: Palette.accent,
 
     borderRadius: 10,
 
@@ -1225,7 +1232,7 @@ const styles = StyleSheet.create({
 
     fontWeight: "700",
 
-    color: "#111111",
+    color: Palette.text,
   },
 
   deleteReviewButton: {
@@ -1233,7 +1240,7 @@ const styles = StyleSheet.create({
 
     borderWidth: 1,
 
-    borderColor: "#dddddd",
+    borderColor: Palette.borderStrong,
 
     borderRadius: 10,
 
@@ -1247,7 +1254,7 @@ const styles = StyleSheet.create({
 
     fontWeight: "700",
 
-    color: "#b42318",
+    color: Palette.danger,
   },
 
   reactionSection: {
@@ -1255,6 +1262,7 @@ const styles = StyleSheet.create({
   },
 
   reactionTitle: {
+    color: Palette.text,
     fontSize: 18,
 
     fontWeight: "700",
@@ -1275,7 +1283,7 @@ const styles = StyleSheet.create({
 
     borderWidth: 1,
 
-    borderColor: "#dddddd",
+    borderColor: Palette.borderStrong,
 
     borderRadius: 22,
 
@@ -1283,20 +1291,22 @@ const styles = StyleSheet.create({
 
     paddingVertical: 9,
 
-    backgroundColor: "#ffffff",
+    backgroundColor: Palette.background,
   },
 
   reactionButtonSelected: {
-    backgroundColor: "#f2f2f2",
+    backgroundColor: Palette.surface,
 
-    borderColor: "#111111",
+    borderColor: Palette.accent,
   },
 
   reactionEmoji: {
+    color: Palette.text,
     fontSize: 20,
   },
 
   reactionCount: {
+    color: Palette.text,
     fontSize: 14,
 
     fontWeight: "600",
@@ -1311,10 +1321,11 @@ const styles = StyleSheet.create({
 
     borderTopWidth: 1,
 
-    borderTopColor: "#eeeeee",
+    borderTopColor: Palette.border,
   },
 
   commentsTitle: {
+    color: Palette.text,
     fontSize: 18,
 
     fontWeight: "700",
@@ -1339,7 +1350,7 @@ const styles = StyleSheet.create({
 
     borderWidth: 1,
 
-    borderColor: "#dddddd",
+    borderColor: Palette.borderStrong,
 
     borderRadius: 12,
 
@@ -1349,13 +1360,13 @@ const styles = StyleSheet.create({
 
     fontSize: 15,
 
-    color: "#111111",
+    color: Palette.text,
 
-    backgroundColor: "#ffffff",
+    backgroundColor: Palette.background,
   },
 
   postButton: {
-    backgroundColor: "#111111",
+    backgroundColor: Palette.accent,
 
     borderRadius: 10,
 
@@ -1369,7 +1380,7 @@ const styles = StyleSheet.create({
   },
 
   postButtonText: {
-    color: "#ffffff",
+    color: Palette.text,
 
     fontSize: 14,
 
@@ -1379,7 +1390,7 @@ const styles = StyleSheet.create({
   noComments: {
     fontSize: 14,
 
-    color: "#777777",
+    color: Palette.textMuted,
 
     marginTop: 20,
   },
@@ -1389,7 +1400,7 @@ const styles = StyleSheet.create({
 
     borderBottomWidth: 1,
 
-    borderBottomColor: "#eeeeee",
+    borderBottomColor: Palette.border,
   },
 
   commentTopRow: {
@@ -1415,7 +1426,7 @@ const styles = StyleSheet.create({
 
     borderRadius: 17,
 
-    backgroundColor: "#eeeeee",
+    backgroundColor: Palette.elevated,
 
     justifyContent: "center",
 
@@ -1425,12 +1436,14 @@ const styles = StyleSheet.create({
   },
 
   commentAvatarText: {
+    color: Palette.text,
     fontSize: 14,
 
     fontWeight: "700",
   },
 
   commentName: {
+    color: Palette.text,
     fontSize: 14,
 
     fontWeight: "700",
@@ -1439,7 +1452,7 @@ const styles = StyleSheet.create({
   commentHandle: {
     fontSize: 12,
 
-    color: "#777777",
+    color: Palette.accent,
 
     marginTop: 1,
   },
@@ -1447,7 +1460,7 @@ const styles = StyleSheet.create({
   deleteComment: {
     fontSize: 12,
 
-    color: "#777777",
+    color: Palette.textMuted,
 
     fontWeight: "600",
 
@@ -1455,6 +1468,7 @@ const styles = StyleSheet.create({
   },
 
   commentText: {
+    color: Palette.text,
     fontSize: 15,
 
     lineHeight: 21,
@@ -1465,7 +1479,7 @@ const styles = StyleSheet.create({
   commentDate: {
     fontSize: 12,
 
-    color: "#999999",
+    color: Palette.textMuted,
 
     marginTop: 6,
   },

@@ -14,6 +14,7 @@ import {
 
 import { fetchUserLists, ListSummary, ListType } from '@/lib/lists';
 import { supabase } from '@/lib/supabase';
+import { Palette } from '@/constants/theme';
 
 type AddToListButtonProps = {
   listType: ListType;
@@ -221,10 +222,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 9,
     borderWidth: 1,
-    borderColor: '#cccccc',
+    borderColor: Palette.borderStrong,
     borderRadius: 10,
   },
   buttonText: {
+    color: Palette.text,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -233,7 +235,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.35)',
   },
   sheet: {
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.surface,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     padding: 24,
@@ -241,6 +243,7 @@ const styles = StyleSheet.create({
     maxHeight: '70%',
   },
   sheetTitle: {
+    color: Palette.text,
     fontSize: 20,
     fontWeight: '700',
     marginBottom: 10,
@@ -253,7 +256,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 15,
-    color: '#777777',
+    color: Palette.textMuted,
     paddingVertical: 12,
   },
   listRow: {
@@ -261,19 +264,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
+    borderBottomColor: Palette.border,
   },
   listInfo: {
     flex: 1,
     paddingRight: 12,
   },
   listName: {
+    color: Palette.text,
     fontSize: 16,
     fontWeight: '600',
   },
   listMeta: {
     fontSize: 13,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 2,
   },
   checkbox: {
@@ -281,16 +285,16 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 6,
     borderWidth: 1.5,
-    borderColor: '#bbbbbb',
+    borderColor: Palette.borderStrong,
     alignItems: 'center',
     justifyContent: 'center',
   },
   checkboxChecked: {
-    backgroundColor: '#111111',
-    borderColor: '#111111',
+    backgroundColor: Palette.accent,
+    borderColor: Palette.accent,
   },
   checkmark: {
-    color: '#ffffff',
+    color: Palette.text,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -300,16 +304,16 @@ const styles = StyleSheet.create({
   newListText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#555555',
+    color: Palette.textSecondary,
   },
   doneButton: {
     paddingVertical: 15,
     borderRadius: 10,
-    backgroundColor: '#111111',
+    backgroundColor: Palette.accent,
     alignItems: 'center',
   },
   doneText: {
-    color: '#ffffff',
+    color: Palette.text,
     fontSize: 16,
     fontWeight: '600',
   },
