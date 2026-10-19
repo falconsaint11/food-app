@@ -13,7 +13,6 @@ import {
 } from "react-native";
 
 import { ListsSection } from "@/components/lists-section";
-import { supabase } from "@/lib/supabase";
 
 type Profile = {
   id: string;
