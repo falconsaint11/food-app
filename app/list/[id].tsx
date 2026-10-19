@@ -19,6 +19,7 @@ import {
     RatingSummary,
 } from '@/lib/lists';
 import { supabase } from '@/lib/supabase';
+import { Palette } from '@/constants/theme';
 
 type ListDetail = {
   id: string;
@@ -397,7 +398,7 @@ export default function ListDetailScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   container: {
     flexGrow: 1,
@@ -409,23 +410,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   notFound: {
     fontSize: 16,
-    color: '#666666',
+    color: Palette.textSecondary,
     textAlign: 'center',
   },
   title: {
+    color: Palette.text,
     fontSize: 28,
     fontWeight: '700',
   },
   meta: {
     fontSize: 14,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 6,
   },
   description: {
+    color: Palette.text,
     fontSize: 15,
     lineHeight: 21,
     marginTop: 12,
@@ -438,35 +441,37 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 15,
-    color: '#777777',
+    color: Palette.textMuted,
   },
   itemRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
+    borderBottomColor: Palette.border,
   },
   itemNumber: {
     width: 28,
     fontSize: 15,
     fontWeight: '700',
-    color: '#999999',
+    color: Palette.textMuted,
   },
   itemInfo: {
     flex: 1,
     paddingRight: 12,
   },
   itemName: {
+    color: Palette.text,
     fontSize: 17,
     fontWeight: '600',
   },
   itemSubtext: {
     fontSize: 13,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 3,
   },
   itemRating: {
+    color: Palette.accent,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -475,7 +480,7 @@ const styles = StyleSheet.create({
   },
   removeText: {
     fontSize: 15,
-    color: '#999999',
+    color: Palette.textMuted,
   },
   ownerActions: {
     flexDirection: 'row',
@@ -485,11 +490,11 @@ const styles = StyleSheet.create({
   actionText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#555555',
+    color: Palette.textSecondary,
   },
   deleteText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#d32f2f',
+    color: Palette.danger,
   },
 });

@@ -9,18 +9,10 @@ import {
 
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Palette } from '@/constants/theme';
 import { getUnreadNotificationCount } from '@/lib/notifications';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-
-  const themeColors =
-    colorScheme === 'dark'
-      ? Colors.dark
-      : Colors.light;
-
   const segments = useSegments();
 
   const [unreadCount, setUnreadCount] =
@@ -47,7 +39,8 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: themeColors.tint,
+        tabBarActiveTintColor: Palette.accent,
+        tabBarInactiveTintColor: Palette.textMuted,
         headerShown: false,
         tabBarButton: HapticTab,
       }}

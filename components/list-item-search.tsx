@@ -11,6 +11,7 @@ import {
 
 import { ListType } from '@/lib/lists';
 import { supabase } from '@/lib/supabase';
+import { Palette } from '@/constants/theme';
 
 type SearchResult = {
   key: string;
@@ -281,7 +282,7 @@ export function ListItemSearch({ listType, onSelect }: ListItemSearchProps) {
           placeholder={
             listType === 'dish' ? 'Add a dish...' : 'Add a restaurant...'
           }
-          placeholderTextColor="#888888"
+          placeholderTextColor={Palette.textMuted}
           autoCorrect={false}
           value={query}
           onChangeText={search}
@@ -331,12 +332,12 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#cccccc',
+    borderColor: Palette.borderStrong,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#111111',
+    color: Palette.text,
   },
   spinner: {
     marginLeft: 10,
@@ -344,27 +345,28 @@ const styles = StyleSheet.create({
   results: {
     marginTop: 6,
     borderWidth: 1,
-    borderColor: '#eeeeee',
+    borderColor: Palette.border,
     borderRadius: 10,
   },
   resultRow: {
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#f2f2f2',
+    borderBottomColor: Palette.border,
   },
   resultTitle: {
+    color: Palette.text,
     fontSize: 15,
     fontWeight: '600',
   },
   resultSubtitle: {
     fontSize: 13,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 2,
   },
   noResults: {
     fontSize: 13,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 8,
   },
 });

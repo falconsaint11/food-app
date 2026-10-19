@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
+import { Palette } from '@/constants/theme';
 
 type SearchType = 'users' | 'restaurants' | 'dishes';
 
@@ -1041,7 +1042,7 @@ export default function DiscoverScreen() {
         placeholder={
           getPlaceholder()
         }
-        placeholderTextColor="#888888"
+        placeholderTextColor={Palette.textMuted}
         autoCapitalize="none"
         value={query}
         onChangeText={handleSearch}
@@ -1171,7 +1172,7 @@ export default function DiscoverScreen() {
 
                           <Text
                             style={
-                              styles.secondaryText
+                              styles.handleText
                             }
                           >
                             @{user.username}
@@ -1878,24 +1879,25 @@ const styles = StyleSheet.create({
     padding: 24,
     paddingTop: 70,
     paddingBottom: 60,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
 
   title: {
+    color: Palette.text,
     fontSize: 30,
     fontWeight: '700',
   },
 
   subtitle: {
     fontSize: 16,
-    color: '#666666',
+    color: Palette.textSecondary,
     marginTop: 8,
     marginBottom: 20,
   },
 
   tabs: {
     flexDirection: 'row',
-    backgroundColor: '#f3f3f3',
+    backgroundColor: Palette.surface,
     borderRadius: 10,
     padding: 4,
     marginBottom: 16,
@@ -1909,38 +1911,38 @@ const styles = StyleSheet.create({
   },
 
   activeTab: {
-    backgroundColor: '#111111',
+    backgroundColor: Palette.accent,
   },
 
   tabText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#666666',
+    color: Palette.textSecondary,
   },
 
   activeTabText: {
-    color: '#ffffff',
+    color: Palette.text,
   },
 
   input: {
     borderWidth: 1,
-    borderColor: '#cccccc',
+    borderColor: Palette.borderStrong,
     borderRadius: 10,
     padding: 14,
     fontSize: 16,
-    color: '#111111',
+    color: Palette.text,
     marginBottom: 12,
   },
 
   statusText: {
     fontSize: 14,
-    color: '#777777',
+    color: Palette.textMuted,
     marginBottom: 10,
   },
 
   noResults: {
     fontSize: 14,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 8,
   },
 
@@ -1949,7 +1951,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
+    borderBottomColor: Palette.border,
   },
 
   resultInfo: {
@@ -1964,14 +1966,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
+    borderBottomColor: Palette.border,
   },
 
   avatar: {
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: '#eeeeee',
+    backgroundColor: Palette.elevated,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -1981,11 +1983,12 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: '#eeeeee',
+    backgroundColor: Palette.elevated,
     marginRight: 12,
   },
 
   avatarText: {
+    color: Palette.text,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -1994,13 +1997,14 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: '#f3f3f3',
+    backgroundColor: Palette.surface,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
 
   iconText: {
+    color: Palette.text,
     fontSize: 18,
   },
 
@@ -2009,43 +2013,50 @@ const styles = StyleSheet.create({
   },
 
   primaryText: {
+    color: Palette.text,
     fontSize: 16,
     fontWeight: '600',
   },
 
+  handleText: {
+    color: Palette.accent,
+    fontSize: 13,
+    marginTop: 3,
+  },
+
   secondaryText: {
     fontSize: 13,
-    color: '#666666',
+    color: Palette.textSecondary,
     marginTop: 3,
   },
 
   chevron: {
     fontSize: 24,
-    color: '#999999',
+    color: Palette.textMuted,
     marginLeft: 10,
   },
 
   followButton: {
-    backgroundColor: '#111111',
+    backgroundColor: Palette.accent,
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 8,
   },
 
   followButtonText: {
-    color: '#ffffff',
+    color: Palette.text,
     fontSize: 14,
     fontWeight: '600',
   },
 
   followingButton: {
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
     borderWidth: 1,
-    borderColor: '#cccccc',
+    borderColor: Palette.borderStrong,
   },
 
   followingButtonText: {
-    color: '#111111',
+    color: Palette.text,
   },
 
   exploreArea: {
@@ -2053,6 +2064,7 @@ const styles = StyleSheet.create({
   },
 
   exploreTitle: {
+    color: Palette.text,
     fontSize: 24,
     fontWeight: '700',
     marginBottom: 22,
@@ -2072,6 +2084,7 @@ const styles = StyleSheet.create({
   },
 
   sectionTitle: {
+    color: Palette.text,
     fontSize: 19,
     fontWeight: '700',
     marginBottom: 3,
@@ -2079,7 +2092,7 @@ const styles = StyleSheet.create({
 
   sectionSubtitle: {
     fontSize: 12,
-    color: '#888888',
+    color: Palette.textMuted,
   },
 
   sectionSpacing: {
@@ -2088,20 +2101,21 @@ const styles = StyleSheet.create({
 
   locationMessage: {
     borderWidth: 1,
-    borderColor: '#eeeeee',
+    borderColor: Palette.border,
     borderRadius: 12,
     padding: 14,
     marginTop: 8,
   },
 
   locationMessageTitle: {
+    color: Palette.text,
     fontSize: 14,
     fontWeight: '700',
   },
 
   locationMessageText: {
     fontSize: 13,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 4,
     lineHeight: 18,
   },
@@ -2111,14 +2125,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
+    borderBottomColor: Palette.border,
   },
 
   rankNumber: {
     width: 28,
     fontSize: 16,
     fontWeight: '700',
-    color: '#777777',
+    color: Palette.textMuted,
   },
 
   rankingInfo: {
@@ -2127,17 +2141,19 @@ const styles = StyleSheet.create({
   },
 
   rankingName: {
+    color: Palette.text,
     fontSize: 16,
     fontWeight: '600',
   },
 
   rankingSubtext: {
     fontSize: 13,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 3,
   },
 
   rankingRating: {
+    color: Palette.accent,
     fontSize: 15,
     fontWeight: '700',
   },
@@ -2148,13 +2164,13 @@ const styles = StyleSheet.create({
 
   nearbyReviewCount: {
     fontSize: 11,
-    color: '#999999',
+    color: Palette.textMuted,
     marginTop: 3,
   },
 
   reviewCount: {
     fontSize: 13,
-    color: '#666666',
+    color: Palette.textSecondary,
     fontWeight: '600',
   },
 });

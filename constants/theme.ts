@@ -5,6 +5,21 @@
 
 import { Platform } from 'react-native';
 
+// The app is always dark. Matches the wotri theme in app/_layout.tsx.
+export const Palette = {
+  background: '#121212',
+  surface: '#1E1E1E',
+  elevated: '#2A2A2A',
+  border: '#2A2A2A',
+  borderStrong: '#3A3A3A',
+  text: '#FFFFFF',
+  textBody: '#DADADA',
+  textSecondary: '#B2B2B2',
+  textMuted: '#8B8B8B',
+  accent: '#FF5722',
+  danger: '#FF6B6B',
+};
+
 const tintColorLight = '#0a7ea4';
 const tintColorDark = '#fff';
 

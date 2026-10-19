@@ -12,6 +12,7 @@ import {
 
 import { AddToListButton } from '@/components/add-to-list-button';
 import { supabase } from '@/lib/supabase';
+import { Palette } from '@/constants/theme';
 
 type Restaurant = {
   id: string;
@@ -339,7 +340,7 @@ export default function RestaurantDetailScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   scrollContent: {
     flexGrow: 1,
@@ -348,7 +349,7 @@ const styles = StyleSheet.create({
   photoPlaceholder: {
     width: '100%',
     height: 220,
-    backgroundColor: '#eeeeee',
+    backgroundColor: Palette.elevated,
   },
   container: {
     padding: 24,
@@ -369,41 +370,44 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   notFound: {
     fontSize: 16,
-    color: '#666666',
+    color: Palette.textSecondary,
   },
   title: {
+    color: Palette.text,
     fontSize: 30,
     fontWeight: '700',
   },
   location: {
     fontSize: 16,
-    color: '#666666',
+    color: Palette.textSecondary,
     marginTop: 6,
   },
   ratingNumber: {
+    color: Palette.accent,
     fontSize: 26,
     fontWeight: '700',
   },
   ratingLabel: {
     fontSize: 14,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 4,
   },
   section: {
     marginTop: 30,
   },
   sectionTitle: {
+    color: Palette.text,
     fontSize: 21,
     fontWeight: '700',
     marginBottom: 10,
   },
   emptyText: {
     fontSize: 15,
-    color: '#777777',
+    color: Palette.textMuted,
   },
   dishRow: {
     flexDirection: 'row',
@@ -411,29 +415,31 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
+    borderBottomColor: Palette.border,
   },
   dishInfo: {
     flex: 1,
     paddingRight: 16,
   },
   dishName: {
+    color: Palette.text,
     fontSize: 17,
     fontWeight: '600',
   },
   dishSubtext: {
     fontSize: 13,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 3,
   },
   dishRating: {
+    color: Palette.accent,
     fontSize: 16,
     fontWeight: '700',
   },
   reviewCard: {
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
+    borderBottomColor: Palette.border,
   },
   reviewTopRow: {
     flexDirection: 'row',
@@ -445,19 +451,22 @@ const styles = StyleSheet.create({
     paddingRight: 16,
   },
   reviewer: {
+    color: Palette.text,
     fontSize: 15,
     fontWeight: '700',
   },
   reviewDish: {
     fontSize: 14,
-    color: '#666666',
+    color: Palette.textSecondary,
     marginTop: 3,
   },
   reviewRating: {
+    color: Palette.accent,
     fontSize: 16,
     fontWeight: '700',
   },
   reviewText: {
+    color: Palette.text,
     fontSize: 15,
     lineHeight: 21,
     marginTop: 9,

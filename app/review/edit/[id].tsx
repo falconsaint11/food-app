@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
+import { Palette } from '@/constants/theme';
 
 const ratingOptions = [
   0.5,
@@ -508,7 +509,7 @@ export default function EditReviewScreen() {
               setReviewText
             }
             placeholder="What did you think?"
-            placeholderTextColor="#888888"
+            placeholderTextColor={Palette.textMuted}
             multiline
             maxLength={1000}
             textAlignVertical="top"
@@ -625,7 +626,7 @@ export default function EditReviewScreen() {
               setDateEaten
             }
             placeholder="YYYY-MM-DD"
-            placeholderTextColor="#888888"
+            placeholderTextColor={Palette.textMuted}
             autoCapitalize="none"
             maxLength={10}
           />
@@ -682,39 +683,42 @@ export default function EditReviewScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   container: {
     flexGrow: 1,
     padding: 24,
     paddingTop: 70,
     paddingBottom: 50,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   title: {
+    color: Palette.text,
     fontSize: 30,
     fontWeight: '700',
   },
   dishName: {
+    color: Palette.text,
     fontSize: 20,
     fontWeight: '600',
     marginTop: 16,
   },
   restaurantName: {
     fontSize: 14,
-    color: '#666666',
+    color: Palette.textSecondary,
     marginTop: 4,
   },
   section: {
     marginTop: 28,
   },
   label: {
+    color: Palette.text,
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 10,
@@ -726,34 +730,34 @@ const styles = StyleSheet.create({
   },
   ratingButton: {
     borderWidth: 1,
-    borderColor: '#dddddd',
+    borderColor: Palette.borderStrong,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   ratingButtonSelected: {
-    backgroundColor: '#111111',
-    borderColor: '#111111',
+    backgroundColor: Palette.accent,
+    borderColor: Palette.accent,
   },
   ratingButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#111111',
+    color: Palette.text,
   },
   ratingButtonTextSelected: {
-    color: '#ffffff',
+    color: Palette.text,
   },
   reviewInput: {
     minHeight: 140,
     borderWidth: 1,
-    borderColor: '#dddddd',
+    borderColor: Palette.borderStrong,
     borderRadius: 12,
     padding: 14,
     fontSize: 16,
     lineHeight: 22,
-    color: '#111111',
-    backgroundColor: '#ffffff',
+    color: Palette.text,
+    backgroundColor: Palette.background,
   },
   photoArea: {
     marginTop: 2,
@@ -762,7 +766,7 @@ const styles = StyleSheet.create({
     width: '100%',
     aspectRatio: 4 / 3,
     borderRadius: 14,
-    backgroundColor: '#eeeeee',
+    backgroundColor: Palette.elevated,
   },
   photoActions: {
     flexDirection: 'row',
@@ -773,53 +777,56 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   changePhotoText: {
+    color: Palette.text,
     fontSize: 13,
     fontWeight: '700',
   },
   removePhotoText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#b42318',
+    color: Palette.danger,
   },
   addPhotoButton: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#dddddd',
+    borderColor: Palette.borderStrong,
     borderRadius: 12,
     padding: 16,
   },
   addPhotoIcon: {
+    color: Palette.text,
     fontSize: 28,
     marginRight: 14,
     fontWeight: '300',
   },
   addPhotoTitle: {
+    color: Palette.text,
     fontSize: 15,
     fontWeight: '700',
   },
   addPhotoSubtitle: {
     fontSize: 12,
-    color: '#888888',
+    color: Palette.textMuted,
     marginTop: 2,
   },
   dateInput: {
     borderWidth: 1,
-    borderColor: '#dddddd',
+    borderColor: Palette.borderStrong,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 13,
     fontSize: 16,
-    color: '#111111',
-    backgroundColor: '#ffffff',
+    color: Palette.text,
+    backgroundColor: Palette.background,
   },
   dateHelp: {
     fontSize: 12,
-    color: '#888888',
+    color: Palette.textMuted,
     marginTop: 6,
   },
   saveButton: {
-    backgroundColor: '#111111',
+    backgroundColor: Palette.accent,
     borderRadius: 12,
     paddingVertical: 15,
     alignItems: 'center',
@@ -829,7 +836,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   saveButtonText: {
-    color: '#ffffff',
+    color: Palette.text,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -841,6 +848,6 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#666666',
+    color: Palette.textSecondary,
   },
 });

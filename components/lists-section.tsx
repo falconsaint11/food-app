@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { fetchUserLists, ListSummary, ListType } from '@/lib/lists';
+import { Palette } from '@/constants/theme';
 
 type ListsSectionProps = {
   userId: string;
@@ -117,17 +118,18 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionTitle: {
+    color: Palette.text,
     fontSize: 21,
     fontWeight: '700',
   },
   newListLink: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#555555',
+    color: Palette.textSecondary,
   },
   toggle: {
     flexDirection: 'row',
-    backgroundColor: '#f2f2f2',
+    backgroundColor: Palette.surface,
     borderRadius: 10,
     padding: 3,
     marginBottom: 10,
@@ -139,25 +141,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   toggleButtonActive: {
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   toggleText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#777777',
+    color: Palette.textMuted,
   },
   toggleTextActive: {
-    color: '#111111',
+    color: Palette.accent,
   },
   emptyCard: {
     borderWidth: 1,
-    borderColor: '#eeeeee',
+    borderColor: Palette.border,
     borderRadius: 12,
     padding: 16,
   },
   emptyText: {
     fontSize: 14,
-    color: '#777777',
+    color: Palette.textMuted,
   },
   listRow: {
     flexDirection: 'row',
@@ -165,9 +167,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
+    borderBottomColor: Palette.border,
   },
   listName: {
+    color: Palette.text,
     flex: 1,
     fontSize: 16,
     fontWeight: '600',
@@ -175,6 +178,6 @@ const styles = StyleSheet.create({
   },
   listMeta: {
     fontSize: 13,
-    color: '#777777',
+    color: Palette.textMuted,
   },
 });

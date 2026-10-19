@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Palette } from "@/constants/theme";
 type ReactionType = "😂" | "🔥" | "🤤" | "❤️";
 type FeedItem = {
   id: string;
@@ -366,21 +367,22 @@ const styles = StyleSheet.create({
     padding: 24,
     paddingTop: 70,
     paddingBottom: 40,
-    backgroundColor: "#ffffff",
+    backgroundColor: Palette.background,
   },
   centered: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#ffffff",
+    backgroundColor: Palette.background,
   },
   title: {
+    color: Palette.text,
     fontSize: 30,
     fontWeight: "700",
   },
   subtitle: {
     fontSize: 16,
-    color: "#666666",
+    color: Palette.textSecondary,
     marginTop: 8,
     marginBottom: 24,
   },
@@ -388,23 +390,24 @@ const styles = StyleSheet.create({
     marginTop: 20,
     padding: 20,
     borderWidth: 1,
-    borderColor: "#eeeeee",
+    borderColor: Palette.border,
     borderRadius: 12,
   },
   emptyTitle: {
+    color: Palette.text,
     fontSize: 18,
     fontWeight: "600",
   },
   emptyText: {
     fontSize: 15,
-    color: "#777777",
+    color: Palette.textMuted,
     marginTop: 6,
     lineHeight: 21,
   },
   card: {
     paddingVertical: 18,
     borderBottomWidth: 1,
-    borderBottomColor: "#eeeeee",
+    borderBottomColor: Palette.border,
   },
   userRow: {
     flexDirection: "row",
@@ -415,7 +418,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: "#eeeeee",
+    backgroundColor: Palette.elevated,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,
@@ -424,10 +427,11 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: "#eeeeee",
+    backgroundColor: Palette.elevated,
     marginRight: 12,
   },
   avatarText: {
+    color: Palette.text,
     fontSize: 17,
     fontWeight: "700",
   },
@@ -435,12 +439,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   userName: {
+    color: Palette.text,
     fontSize: 16,
     fontWeight: "700",
   },
   userHandle: {
     fontSize: 13,
-    color: "#777777",
+    color: Palette.accent,
     marginTop: 2,
   },
   foodRow: {
@@ -453,21 +458,23 @@ const styles = StyleSheet.create({
     paddingRight: 16,
   },
   dishName: {
+    color: Palette.text,
     fontSize: 18,
     fontWeight: "600",
   },
   restaurantName: {
     fontSize: 14,
-    color: "#666666",
+    color: Palette.textSecondary,
     marginTop: 3,
   },
   restaurantLink: {
     fontSize: 14,
-    color: "#444444",
+    color: Palette.textBody,
     marginTop: 3,
     fontWeight: "600",
   },
   rating: {
+    color: Palette.accent,
     fontSize: 18,
     fontWeight: "700",
   },
@@ -476,9 +483,10 @@ const styles = StyleSheet.create({
     aspectRatio: 4 / 3,
     borderRadius: 14,
     marginTop: 14,
-    backgroundColor: "#eeeeee",
+    backgroundColor: Palette.elevated,
   },
   review: {
+    color: Palette.text,
     fontSize: 15,
     lineHeight: 21,
     marginTop: 12,
@@ -496,22 +504,22 @@ const styles = StyleSheet.create({
   },
   engagementText: {
     fontSize: 14,
-    color: "#555555",
+    color: Palette.textSecondary,
     fontWeight: "600",
   },
   commentCount: {
     fontSize: 13,
-    color: "#777777",
+    color: Palette.textMuted,
     fontWeight: "600",
   },
   date: {
     fontSize: 12,
-    color: "#888888",
+    color: Palette.textMuted,
     marginTop: 3,
   },
   readMore: {
     fontSize: 14,
-    color: "#555555",
+    color: Palette.textSecondary,
     fontWeight: "700",
     marginTop: 5,
   },
@@ -523,16 +531,16 @@ const styles = StyleSheet.create({
   },
   wentWithLabel: {
     fontSize: 14,
-    color: "#666666",
+    color: Palette.textSecondary,
   },
   tagLink: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#111111",
+    color: Palette.accent,
   },
   viewReview: {
     fontSize: 13,
-    color: "#777777",
+    color: Palette.textMuted,
     marginTop: 10,
     fontWeight: "600",
   },
