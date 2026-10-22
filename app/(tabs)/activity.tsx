@@ -19,6 +19,7 @@ import {
 } from '@/lib/notifications';
 
 import { supabase } from '@/lib/supabase';
+import { Palette } from '@/constants/theme';
 
 type AvatarMap = {
   [userId: string]: string | null;
@@ -649,14 +650,14 @@ const styles = StyleSheet.create({
     padding: 24,
     paddingTop: 70,
     paddingBottom: 50,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
 
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
 
   headerRow: {
@@ -672,19 +673,20 @@ const styles = StyleSheet.create({
   },
 
   title: {
+    color: Palette.text,
     fontSize: 30,
     fontWeight: '700',
   },
 
   subtitle: {
     fontSize: 14,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 5,
   },
 
   markAllButton: {
     borderWidth: 1,
-    borderColor: '#dddddd',
+    borderColor: Palette.borderStrong,
     borderRadius: 9,
     paddingHorizontal: 11,
     paddingVertical: 8,
@@ -694,7 +696,7 @@ const styles = StyleSheet.create({
   markAll: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#333333',
+    color: Palette.textBody,
   },
 
   section: {
@@ -712,6 +714,7 @@ const styles = StyleSheet.create({
   },
 
   sectionTitle: {
+    color: Palette.text,
     fontSize: 18,
     fontWeight: '700',
   },
@@ -721,14 +724,14 @@ const styles = StyleSheet.create({
     height: 22,
     paddingHorizontal: 6,
     borderRadius: 11,
-    backgroundColor: '#111111',
+    backgroundColor: Palette.accent,
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 8,
   },
 
   countBadgeText: {
-    color: '#ffffff',
+    color: Palette.text,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -739,7 +742,7 @@ const styles = StyleSheet.create({
     paddingVertical: 34,
     paddingHorizontal: 24,
     borderWidth: 1,
-    borderColor: '#eeeeee',
+    borderColor: Palette.border,
     borderRadius: 16,
   },
 
@@ -747,24 +750,26 @@ const styles = StyleSheet.create({
     width: 54,
     height: 54,
     borderRadius: 27,
-    backgroundColor: '#f3f3f3',
+    backgroundColor: Palette.surface,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 14,
   },
 
   emptyIconText: {
+    color: Palette.text,
     fontSize: 23,
   },
 
   emptyTitle: {
+    color: Palette.text,
     fontSize: 17,
     fontWeight: '700',
   },
 
   emptyText: {
     fontSize: 14,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 6,
     lineHeight: 20,
     textAlign: 'center',
@@ -778,21 +783,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     marginTop: 6,
     borderWidth: 1,
-    borderColor: '#eeeeee',
+    borderColor: Palette.border,
     borderRadius: 14,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
 
   unreadNotification: {
-    backgroundColor: '#f7f7f7',
-    borderColor: '#dddddd',
+    backgroundColor: Palette.surface,
+    borderColor: Palette.borderStrong,
   },
 
   avatar: {
     width: 46,
     height: 46,
     borderRadius: 23,
-    backgroundColor: '#eeeeee',
+    backgroundColor: Palette.elevated,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -802,11 +807,12 @@ const styles = StyleSheet.create({
     width: 46,
     height: 46,
     borderRadius: 23,
-    backgroundColor: '#eeeeee',
+    backgroundColor: Palette.elevated,
     marginRight: 12,
   },
 
   avatarText: {
+    color: Palette.text,
     fontSize: 17,
     fontWeight: '700',
   },
@@ -825,14 +831,15 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     lineHeight: 20,
-    color: '#333333',
+    color: Palette.textBody,
   },
 
   unreadText: {
-    color: '#111111',
+    color: Palette.text,
   },
 
   actorName: {
+    color: Palette.text,
     fontWeight: '700',
   },
 
@@ -840,14 +847,14 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#111111',
+    backgroundColor: Palette.accent,
     marginLeft: 8,
     marginTop: 6,
   },
 
   commentPreviewBox: {
     marginTop: 7,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 7,
@@ -855,13 +862,13 @@ const styles = StyleSheet.create({
 
   commentPreview: {
     fontSize: 13,
-    color: '#666666',
+    color: Palette.textSecondary,
     lineHeight: 18,
   },
 
   time: {
     fontSize: 11,
-    color: '#999999',
+    color: Palette.textMuted,
     marginTop: 7,
   },
 
@@ -872,6 +879,7 @@ const styles = StyleSheet.create({
   },
 
   notificationIcon: {
+    color: Palette.text,
     fontSize: 19,
   },
 });

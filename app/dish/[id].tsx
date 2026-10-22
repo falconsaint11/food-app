@@ -10,7 +10,9 @@ import {
     View,
 } from 'react-native';
 
+import { AddToListButton } from '@/components/add-to-list-button';
 import { supabase } from '@/lib/supabase';
+import { Palette } from '@/constants/theme';
 
 type Dish = {
   id: string;
@@ -185,6 +187,8 @@ export default function DishDetailScreen() {
         </TouchableOpacity>
       ) : null}
 
+      <AddToListButton listType="dish" targetId={dish.id} />
+
       <View style={styles.statsCard}>
         <View style={styles.stat}>
           <Text style={styles.statNumber}>
@@ -301,25 +305,26 @@ const styles = StyleSheet.create({
     padding: 24,
     paddingTop: 70,
     paddingBottom: 50,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   notFound: {
     fontSize: 16,
-    color: '#666666',
+    color: Palette.textSecondary,
   },
   title: {
+    color: Palette.text,
     fontSize: 30,
     fontWeight: '700',
   },
   restaurantLink: {
     fontSize: 16,
-    color: '#555555',
+    color: Palette.textSecondary,
     fontWeight: '600',
     marginTop: 6,
   },
@@ -328,7 +333,7 @@ const styles = StyleSheet.create({
     marginTop: 24,
     paddingVertical: 18,
     borderWidth: 1,
-    borderColor: '#eeeeee',
+    borderColor: Palette.border,
     borderRadius: 14,
   },
   stat: {
@@ -336,43 +341,45 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statNumber: {
+    color: Palette.text,
     fontSize: 18,
     fontWeight: '700',
   },
   statLabel: {
     fontSize: 12,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 4,
     textAlign: 'center',
   },
   statDivider: {
     width: 1,
-    backgroundColor: '#eeeeee',
+    backgroundColor: Palette.elevated,
   },
   details: {
     marginTop: 18,
   },
   detailText: {
     fontSize: 14,
-    color: '#666666',
+    color: Palette.textSecondary,
     marginTop: 4,
   },
   section: {
     marginTop: 30,
   },
   sectionTitle: {
+    color: Palette.text,
     fontSize: 21,
     fontWeight: '700',
     marginBottom: 10,
   },
   emptyText: {
     fontSize: 15,
-    color: '#777777',
+    color: Palette.textMuted,
   },
   reviewCard: {
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
+    borderBottomColor: Palette.border,
   },
   reviewTopRow: {
     flexDirection: 'row',
@@ -384,19 +391,22 @@ const styles = StyleSheet.create({
     paddingRight: 16,
   },
   reviewer: {
+    color: Palette.text,
     fontSize: 15,
     fontWeight: '700',
   },
   handle: {
     fontSize: 13,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 2,
   },
   reviewRating: {
+    color: Palette.accent,
     fontSize: 16,
     fontWeight: '700',
   },
   reviewText: {
+    color: Palette.text,
     fontSize: 15,
     lineHeight: 21,
     marginTop: 9,

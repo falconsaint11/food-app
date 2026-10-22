@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
+import { Palette } from '@/constants/theme';
 
 type Profile = {
   id: string;
@@ -270,7 +271,7 @@ const styles =
       paddingTop: 70,
       paddingBottom: 50,
       backgroundColor:
-        '#ffffff',
+        Palette.background,
     },
 
     centered: {
@@ -280,7 +281,7 @@ const styles =
       alignItems:
         'center',
       backgroundColor:
-        '#ffffff',
+        Palette.background,
     },
 
     header: {
@@ -288,32 +289,34 @@ const styles =
     },
 
     title: {
+      color: Palette.text,
       fontSize: 30,
       fontWeight: '700',
     },
 
     subtitle: {
       fontSize: 14,
-      color: '#777777',
+      color: Palette.textMuted,
       marginTop: 4,
     },
 
     emptyCard: {
       borderWidth: 1,
       borderColor:
-        '#eeeeee',
+        Palette.border,
       borderRadius: 14,
       padding: 18,
     },
 
     emptyTitle: {
+      color: Palette.text,
       fontSize: 15,
       fontWeight: '700',
     },
 
     emptyText: {
       fontSize: 13,
-      color: '#777777',
+      color: Palette.textMuted,
       lineHeight: 18,
       marginTop: 4,
     },
@@ -324,7 +327,7 @@ const styles =
       paddingVertical: 14,
       borderBottomWidth: 1,
       borderBottomColor:
-        '#eeeeee',
+        Palette.border,
     },
 
     avatar: {
@@ -332,7 +335,7 @@ const styles =
       height: 48,
       borderRadius: 24,
       backgroundColor:
-        '#eeeeee',
+        Palette.elevated,
       alignItems:
         'center',
       justifyContent:
@@ -345,11 +348,12 @@ const styles =
       height: 48,
       borderRadius: 24,
       backgroundColor:
-        '#eeeeee',
+        Palette.elevated,
       marginRight: 14,
     },
 
     avatarText: {
+      color: Palette.text,
       fontSize: 18,
       fontWeight: '700',
     },
@@ -359,19 +363,20 @@ const styles =
     },
 
     displayName: {
+      color: Palette.text,
       fontSize: 16,
       fontWeight: '700',
     },
 
     username: {
       fontSize: 13,
-      color: '#777777',
+      color: Palette.accent,
       marginTop: 3,
     },
 
     chevron: {
       fontSize: 24,
-      color: '#aaaaaa',
+      color: Palette.textMuted,
       marginLeft: 12,
     },
   });

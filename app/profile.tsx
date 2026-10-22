@@ -11,6 +11,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+
+import { ListsSection } from "@/components/lists-section";
+import { Palette } from "@/constants/theme";
+
 type Profile = {
   id: string;
   username: string;
@@ -238,6 +242,24 @@ export default function ProfileScreen() {
     const { data } = supabase.storage.from("profile-photos").getPublicUrl(path);
     return data.publicUrl;
   }
+
+  function confirmSignOut() {
+    Alert.alert("Sign out", "Are you sure you want to sign out?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Sign Out",
+        style: "destructive",
+        onPress: async () => {
+          const { error } = await supabase.auth.signOut();
+
+          if (error) {
+            Alert.alert("Sign out error", error.message);
+          }
+        },
+      },
+    ]);
+  }
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -257,6 +279,13 @@ export default function ProfileScreen() {
           onPress={() => router.push("/create-profile")}
         >
           <Text style={styles.createProfileButtonText}>Create Profile</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.signOutButton}
+          onPress={confirmSignOut}
+        >
+          <Text style={styles.signOutText}>Sign Out</Text>
         </TouchableOpacity>
       </View>
     );
@@ -301,16 +330,10 @@ export default function ProfileScreen() {
             <Text style={styles.editButtonText}>Edit Profile</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.switchAccountButton}
-            onPress={async () => {
-              const { error } = await supabase.auth.signOut();
-              if (error) {
-                Alert.alert("Sign out error", error.message);
-                return;
-              }
-            }}
+            style={styles.signOutButton}
+            onPress={confirmSignOut}
           >
-            <Text style={styles.switchAccountText}>Switch Account</Text>
+            <Text style={styles.signOutText}>Sign Out</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -362,6 +385,9 @@ export default function ProfileScreen() {
           <Text style={styles.socialLabel}>Following</Text>
         </TouchableOpacity>
       </View>
+
+      <ListsSection userId={profile.id} isOwner />
+
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Top Dishes</Text>
@@ -535,32 +561,33 @@ const styles = StyleSheet.create({
     padding: 24,
     paddingTop: 55,
     paddingBottom: 60,
-    backgroundColor: "#ffffff",
+    backgroundColor: Palette.background,
   },
   centered: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#ffffff",
+    backgroundColor: Palette.background,
   },
   noProfileTitle: {
+    color: Palette.text,
     fontSize: 24,
     fontWeight: "700",
   },
   noProfileText: {
     fontSize: 15,
-    color: "#666666",
+    color: Palette.textSecondary,
     marginTop: 8,
     marginBottom: 20,
   },
   createProfileButton: {
-    backgroundColor: "#111111",
+    backgroundColor: Palette.accent,
     borderRadius: 10,
     paddingHorizontal: 20,
     paddingVertical: 12,
   },
   createProfileButtonText: {
-    color: "#ffffff",
+    color: Palette.text,
     fontSize: 15,
     fontWeight: "600",
   },
@@ -571,21 +598,23 @@ const styles = StyleSheet.create({
     width: 92,
     height: 92,
     borderRadius: 46,
-    backgroundColor: "#eeeeee",
+    backgroundColor: Palette.elevated,
   },
   avatarPlaceholder: {
     width: 92,
     height: 92,
     borderRadius: 46,
-    backgroundColor: "#eeeeee",
+    backgroundColor: Palette.elevated,
     justifyContent: "center",
     alignItems: "center",
   },
   avatarText: {
+    color: Palette.text,
     fontSize: 34,
     fontWeight: "700",
   },
   displayName: {
+    color: Palette.text,
     fontSize: 28,
     fontWeight: "700",
     textAlign: "center",
@@ -595,7 +624,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     textAlign: "center",
     marginTop: 3,
-    color: "#777777",
+    color: Palette.textMuted,
   },
   cityRow: {
     flexDirection: "row",
@@ -605,14 +634,14 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   cityPin: { fontSize: 17, color: "#FF5722", fontWeight: "700" },
-  cityText: { fontSize: 14, color: "#666666" },
+  cityText: { fontSize: 14, color: Palette.textSecondary },
 
   bio: {
     fontSize: 15,
     textAlign: "center",
     marginTop: 12,
     lineHeight: 21,
-    color: "#333333",
+    color: Palette.textBody,
     maxWidth: 320,
   },
   profileActions: {
@@ -625,26 +654,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: "#cccccc",
+    borderColor: Palette.borderStrong,
     borderRadius: 10,
   },
   editButtonText: {
+    color: Palette.text,
     fontSize: 14,
     fontWeight: "600",
   },
-  switchAccountButton: {
+
+  signOutButton: {
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
-  switchAccountText: {
+
+  signOutText: {
     fontSize: 14,
-    color: "#666666",
+    color: Palette.danger,
     fontWeight: "600",
   },
   statsCard: {
     flexDirection: "row",
     borderWidth: 1,
-    borderColor: "#eeeeee",
+    borderColor: Palette.border,
     borderRadius: 14,
     marginTop: 28,
     paddingVertical: 17,
@@ -655,16 +687,17 @@ const styles = StyleSheet.create({
   },
   statDivider: {
     width: 1,
-    backgroundColor: "#eeeeee",
+    backgroundColor: Palette.elevated,
   },
   statNumber: {
+    color: Palette.text,
     fontSize: 20,
     fontWeight: "700",
   },
   statLabel: {
     fontSize: 12,
     marginTop: 4,
-    color: "#777777",
+    color: Palette.textMuted,
   },
   socialStats: {
     flexDirection: "row",
@@ -677,12 +710,13 @@ const styles = StyleSheet.create({
     minWidth: 80,
   },
   socialNumber: {
+    color: Palette.text,
     fontSize: 16,
     fontWeight: "700",
   },
   socialLabel: {
     fontSize: 13,
-    color: "#666666",
+    color: Palette.textSecondary,
     marginTop: 2,
   },
   section: {
@@ -695,13 +729,14 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionTitle: {
+    color: Palette.text,
     fontSize: 21,
     fontWeight: "700",
   },
   rankLink: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#555555",
+    color: Palette.textSecondary,
   },
   featureGrid: {
     flexDirection: "row",
@@ -712,48 +747,49 @@ const styles = StyleSheet.create({
     width: "48%",
     minHeight: 118,
     borderWidth: 1,
-    borderColor: "#eeeeee",
+    borderColor: Palette.border,
     borderRadius: 14,
     padding: 14,
     justifyContent: "flex-start",
   },
   rankBadge: {
     alignSelf: "flex-start",
-    backgroundColor: "#111111",
+    backgroundColor: Palette.accent,
     borderRadius: 7,
     paddingHorizontal: 8,
     paddingVertical: 4,
     marginBottom: 12,
   },
   rankBadgeText: {
-    color: "#ffffff",
+    color: Palette.text,
     fontSize: 12,
     fontWeight: "700",
   },
   featureName: {
+    color: Palette.text,
     fontSize: 16,
     fontWeight: "700",
     lineHeight: 20,
   },
   featureSubtext: {
     fontSize: 12,
-    color: "#777777",
+    color: Palette.textMuted,
     marginTop: 5,
   },
   emptyCard: {
     borderWidth: 1,
-    borderColor: "#eeeeee",
+    borderColor: Palette.border,
     borderRadius: 12,
     padding: 16,
   },
   emptyText: {
     fontSize: 14,
-    color: "#777777",
+    color: Palette.textMuted,
   },
   diaryCard: {
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "#eeeeee",
+    borderBottomColor: Palette.border,
   },
   diaryContentRow: {
     flexDirection: "row",
@@ -764,7 +800,7 @@ const styles = StyleSheet.create({
     height: 88,
     borderRadius: 12,
     marginRight: 13,
-    backgroundColor: "#eeeeee",
+    backgroundColor: Palette.elevated,
   },
   diaryMainContent: {
     flex: 1,
@@ -782,32 +818,34 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
   },
   dishName: {
+    color: Palette.text,
     fontSize: 17,
     fontWeight: "700",
   },
   restaurantName: {
     fontSize: 13,
-    color: "#666666",
+    color: Palette.textSecondary,
     marginTop: 3,
   },
   rating: {
+    color: Palette.accent,
     fontSize: 17,
     fontWeight: "700",
   },
   dateText: {
     fontSize: 11,
-    color: "#999999",
+    color: Palette.textMuted,
     marginTop: 3,
   },
   reviewText: {
     fontSize: 14,
     marginTop: 8,
     lineHeight: 19,
-    color: "#333333",
+    color: Palette.textBody,
   },
   viewReview: {
     fontSize: 12,
-    color: "#777777",
+    color: Palette.textMuted,
     fontWeight: "600",
     marginTop: 7,
   },

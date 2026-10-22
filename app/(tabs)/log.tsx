@@ -20,6 +20,7 @@ import {
 } from "react-native";
 
 import { supabase } from "@/lib/supabase";
+import { Palette } from "@/constants/theme";
 
 type RestaurantResult = {
   id: string;
@@ -1125,7 +1126,7 @@ export default function LogScreen() {
         <TextInput
           style={styles.input}
           placeholder="Search restaurant"
-          placeholderTextColor="#888888"
+          placeholderTextColor={Palette.textMuted}
           value={restaurantName}
           onChangeText={searchRestaurants}
         />
@@ -1283,7 +1284,7 @@ export default function LogScreen() {
                 selectedRestaurantId && styles.inputDisabled,
               ]}
               placeholder="City"
-              placeholderTextColor="#888888"
+              placeholderTextColor={Palette.textMuted}
               value={city}
               onChangeText={setCity}
               editable={!selectedRestaurantId}
@@ -1298,7 +1299,7 @@ export default function LogScreen() {
                 selectedRestaurantId && styles.inputDisabled,
               ]}
               placeholder="State, e.g. AZ"
-              placeholderTextColor="#888888"
+              placeholderTextColor={Palette.textMuted}
               value={state}
               onChangeText={setState}
               autoCapitalize="characters"
@@ -1380,7 +1381,7 @@ export default function LogScreen() {
               ? "Search or add a menu item"
               : "Enter dish name"
           }
-          placeholderTextColor="#888888"
+          placeholderTextColor={Palette.textMuted}
           value={dishName}
           onChangeText={searchDishes}
         />
@@ -1492,7 +1493,7 @@ export default function LogScreen() {
         <TextInput
           style={[styles.input, styles.reviewInput]}
           placeholder="What did you think?"
-          placeholderTextColor="#888888"
+          placeholderTextColor={Palette.textMuted}
           multiline
           value={reviewText}
           onChangeText={setReviewText}
@@ -1502,7 +1503,7 @@ export default function LogScreen() {
         <TextInput
           style={styles.input}
           placeholder="Search your mutual followers..."
-          placeholderTextColor="#888888"
+          placeholderTextColor={Palette.textMuted}
           value={friendSearch}
           onChangeText={setFriendSearch}
         />
@@ -1625,10 +1626,11 @@ const styles = StyleSheet.create({
 
     paddingBottom: 40,
 
-    backgroundColor: "#ffffff",
+    backgroundColor: Palette.background,
   },
 
   title: {
+    color: Palette.text,
     fontSize: 30,
 
     fontWeight: "700",
@@ -1637,7 +1639,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
 
-    color: "#666666",
+    color: Palette.textSecondary,
 
     marginTop: 8,
 
@@ -1645,6 +1647,7 @@ const styles = StyleSheet.create({
   },
 
   label: {
+    color: Palette.text,
     fontSize: 14,
 
     fontWeight: "600",
@@ -1655,7 +1658,7 @@ const styles = StyleSheet.create({
   input: {
     borderWidth: 1,
 
-    borderColor: "#cccccc",
+    borderColor: Palette.borderStrong,
 
     borderRadius: 10,
 
@@ -1663,27 +1666,27 @@ const styles = StyleSheet.create({
 
     fontSize: 16,
 
-    color: "#111111",
+    color: Palette.text,
 
     marginBottom: 12,
 
-    backgroundColor: "#ffffff",
+    backgroundColor: Palette.background,
   },
 
   inputDisabled: {
-    backgroundColor: "#f5f5f5",
+    backgroundColor: Palette.surface,
 
-    color: "#666666",
+    color: Palette.textSecondary,
   },
 
   inputNeedsRestaurant: {
-    borderColor: "#dddddd",
+    borderColor: Palette.borderStrong,
   },
 
   resultsBox: {
     borderWidth: 1,
 
-    borderColor: "#eeeeee",
+    borderColor: Palette.border,
 
     borderRadius: 10,
 
@@ -1697,7 +1700,7 @@ const styles = StyleSheet.create({
 
     fontWeight: "700",
 
-    color: "#777777",
+    color: Palette.textMuted,
 
     paddingHorizontal: 12,
 
@@ -1713,10 +1716,11 @@ const styles = StyleSheet.create({
 
     borderTopWidth: 1,
 
-    borderTopColor: "#eeeeee",
+    borderTopColor: Palette.border,
   },
 
   resultName: {
+    color: Palette.text,
     fontSize: 16,
 
     fontWeight: "600",
@@ -1725,7 +1729,7 @@ const styles = StyleSheet.create({
   resultSubtext: {
     fontSize: 13,
 
-    color: "#777777",
+    color: Palette.textMuted,
 
     marginTop: 2,
   },
@@ -1743,7 +1747,7 @@ const styles = StyleSheet.create({
   googleLoadingText: {
     fontSize: 12,
 
-    color: "#777777",
+    color: Palette.textMuted,
 
     marginLeft: 8,
   },
@@ -1751,7 +1755,7 @@ const styles = StyleSheet.create({
   selectedBox: {
     borderWidth: 1,
 
-    borderColor: "#dddddd",
+    borderColor: Palette.borderStrong,
 
     borderRadius: 10,
 
@@ -1759,13 +1763,13 @@ const styles = StyleSheet.create({
 
     marginBottom: 16,
 
-    backgroundColor: "#f7f7f7",
+    backgroundColor: Palette.surface,
   },
 
   googleSelectedBox: {
     borderWidth: 1,
 
-    borderColor: "#dddddd",
+    borderColor: Palette.borderStrong,
 
     borderRadius: 10,
 
@@ -1773,7 +1777,7 @@ const styles = StyleSheet.create({
 
     marginBottom: 16,
 
-    backgroundColor: "#f7f7f7",
+    backgroundColor: Palette.surface,
   },
 
   selectedTitle: {
@@ -1781,10 +1785,11 @@ const styles = StyleSheet.create({
 
     fontWeight: "700",
 
-    color: "#555555",
+    color: Palette.textSecondary,
   },
 
   selectedText: {
+    color: Palette.text,
     fontSize: 14,
 
     fontWeight: "600",
@@ -1795,7 +1800,7 @@ const styles = StyleSheet.create({
   selectedLocation: {
     fontSize: 12,
 
-    color: "#777777",
+    color: Palette.textMuted,
 
     marginTop: 3,
   },
@@ -1803,7 +1808,7 @@ const styles = StyleSheet.create({
   newItemBox: {
     borderWidth: 1,
 
-    borderColor: "#eeeeee",
+    borderColor: Palette.border,
 
     borderRadius: 10,
 
@@ -1817,13 +1822,13 @@ const styles = StyleSheet.create({
 
     fontWeight: "700",
 
-    color: "#777777",
+    color: Palette.textMuted,
   },
 
   newItemText: {
     fontSize: 13,
 
-    color: "#666666",
+    color: Palette.textSecondary,
 
     lineHeight: 18,
 
@@ -1835,7 +1840,7 @@ const styles = StyleSheet.create({
 
     lineHeight: 17,
 
-    color: "#777777",
+    color: Palette.textMuted,
 
     marginTop: -4,
 
@@ -1847,6 +1852,7 @@ const styles = StyleSheet.create({
   },
 
   locationLabel: {
+    color: Palette.text,
     fontSize: 14,
 
     fontWeight: "600",
@@ -1855,7 +1861,7 @@ const styles = StyleSheet.create({
   locationHelper: {
     fontSize: 12,
 
-    color: "#777777",
+    color: Palette.textMuted,
 
     lineHeight: 17,
 
@@ -1867,7 +1873,7 @@ const styles = StyleSheet.create({
   locationButton: {
     borderWidth: 1,
 
-    borderColor: "#cccccc",
+    borderColor: Palette.borderStrong,
 
     borderRadius: 10,
 
@@ -1879,6 +1885,7 @@ const styles = StyleSheet.create({
   },
 
   locationButtonText: {
+    color: Palette.text,
     fontSize: 14,
 
     fontWeight: "700",
@@ -1891,13 +1898,13 @@ const styles = StyleSheet.create({
 
     borderWidth: 1,
 
-    borderColor: "#dddddd",
+    borderColor: Palette.borderStrong,
 
     borderRadius: 10,
 
     padding: 12,
 
-    backgroundColor: "#f7f7f7",
+    backgroundColor: Palette.surface,
   },
 
   locationSavedInfo: {
@@ -1907,6 +1914,7 @@ const styles = StyleSheet.create({
   },
 
   locationSavedTitle: {
+    color: Palette.text,
     fontSize: 13,
 
     fontWeight: "700",
@@ -1915,7 +1923,7 @@ const styles = StyleSheet.create({
   locationSavedText: {
     fontSize: 12,
 
-    color: "#777777",
+    color: Palette.textMuted,
 
     marginTop: 2,
   },
@@ -1923,7 +1931,7 @@ const styles = StyleSheet.create({
   removeLocationText: {
     fontSize: 12,
 
-    color: "#b42318",
+    color: Palette.danger,
 
     fontWeight: "600",
   },
@@ -1955,13 +1963,14 @@ const styles = StyleSheet.create({
   },
 
   star: {
+    color: Palette.text,
     fontSize: 42,
 
     lineHeight: 48,
   },
 
   emptyStar: {
-    color: "#d8d8d8",
+    color: Palette.borderStrong,
 
     position: "absolute",
 
@@ -1983,7 +1992,7 @@ const styles = StyleSheet.create({
   },
 
   filledStar: {
-    color: "#111111",
+    color: Palette.accent,
 
     position: "absolute",
 
@@ -1997,7 +2006,7 @@ const styles = StyleSheet.create({
   dragHint: {
     fontSize: 12,
 
-    color: "#888888",
+    color: Palette.textMuted,
 
     marginTop: 4,
   },
@@ -2011,6 +2020,7 @@ const styles = StyleSheet.create({
   },
 
   ratingNumber: {
+    color: Palette.accent,
     fontSize: 26,
 
     fontWeight: "700",
@@ -2023,7 +2033,7 @@ const styles = StyleSheet.create({
 
     fontWeight: "600",
 
-    color: "#555555",
+    color: Palette.textSecondary,
 
     marginLeft: 8,
   },
@@ -2041,7 +2051,7 @@ const styles = StyleSheet.create({
 
     borderWidth: 1,
 
-    borderColor: "#dddddd",
+    borderColor: Palette.borderStrong,
 
     borderRadius: 12,
 
@@ -2051,6 +2061,7 @@ const styles = StyleSheet.create({
   },
 
   addPhotoIcon: {
+    color: Palette.text,
     fontSize: 28,
 
     marginRight: 14,
@@ -2059,6 +2070,7 @@ const styles = StyleSheet.create({
   },
 
   addPhotoTitle: {
+    color: Palette.text,
     fontSize: 15,
 
     fontWeight: "700",
@@ -2067,7 +2079,7 @@ const styles = StyleSheet.create({
   addPhotoSubtitle: {
     fontSize: 12,
 
-    color: "#888888",
+    color: Palette.textMuted,
 
     marginTop: 2,
   },
@@ -2083,7 +2095,7 @@ const styles = StyleSheet.create({
 
     borderRadius: 14,
 
-    backgroundColor: "#eeeeee",
+    backgroundColor: Palette.elevated,
   },
 
   photoActions: {
@@ -2099,6 +2111,7 @@ const styles = StyleSheet.create({
   },
 
   changePhotoText: {
+    color: Palette.text,
     fontSize: 13,
 
     fontWeight: "700",
@@ -2113,11 +2126,11 @@ const styles = StyleSheet.create({
 
     fontWeight: "600",
 
-    color: "#b42318",
+    color: Palette.danger,
   },
 
   button: {
-    backgroundColor: "#111111",
+    backgroundColor: Palette.accent,
 
     padding: 16,
 
@@ -2133,7 +2146,7 @@ const styles = StyleSheet.create({
   },
 
   buttonText: {
-    color: "#ffffff",
+    color: Palette.text,
 
     fontSize: 16,
 
@@ -2151,7 +2164,7 @@ const styles = StyleSheet.create({
 
     fontWeight: "600",
 
-    color: "#555555",
+    color: Palette.textSecondary,
 
     textDecorationLine: "underline",
   },
@@ -2168,30 +2181,32 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 12,
     borderWidth: 1,
-    borderColor: "#eeeeee",
+    borderColor: Palette.border,
     borderRadius: 10,
     marginBottom: 8,
   },
   friendSelected: {
-    backgroundColor: "#f2f2f2",
-    borderColor: "#111111",
+    backgroundColor: Palette.surface,
+    borderColor: Palette.accent,
   },
   friendName: {
+    color: Palette.text,
     fontSize: 15,
     fontWeight: "600",
   },
   friendHandle: {
     fontSize: 13,
-    color: "#777777",
+    color: Palette.textMuted,
     marginTop: 3,
   },
   friendCheck: {
+    color: Palette.text,
     fontSize: 20,
     fontWeight: "700",
   },
   friendsHelper: {
     fontSize: 13,
-    color: "#777777",
+    color: Palette.textMuted,
     marginBottom: 15,
   },
 });

@@ -1,16 +1,18 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
+import { AddToListButton } from '@/components/add-to-list-button';
 import { supabase } from '@/lib/supabase';
+import { Palette } from '@/constants/theme';
 
 type Restaurant = {
   id: string;
@@ -50,6 +52,7 @@ export default function RestaurantDetailScreen() {
   const [dishes, setDishes] = useState<DishSummary[]>([]);
   const [reviews, setReviews] = useState<RecentReview[]>([]);
   const [averageRating, setAverageRating] = useState(0);
+  const [totalReviewCount, setTotalReviewCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useFocusEffect(
@@ -103,6 +106,7 @@ export default function RestaurantDetailScreen() {
       setDishes([]);
       setReviews([]);
       setAverageRating(0);
+      setTotalReviewCount(0);
       setLoading(false);
       return;
     }
@@ -136,6 +140,7 @@ export default function RestaurantDetailScreen() {
     }
 
     const allReviews = (reviewData ?? []) as any[];
+    setTotalReviewCount(allReviews.length);
 
     if (allReviews.length > 0) {
       const total = allReviews.reduce(
@@ -207,163 +212,202 @@ export default function RestaurantDetailScreen() {
     .join(', ');
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>{restaurant.name}</Text>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.scrollContent}
+    >
+      {/* Placeholder until restaurant photos are supported */}
+      <View style={styles.photoPlaceholder} />
 
-      {location ? (
-        <Text style={styles.location}>{location}</Text>
-      ) : null}
+      <View style={styles.container}>
+        <View style={styles.headerRow}>
+          <View style={styles.headerInfo}>
+            <Text style={styles.title}>{restaurant.name}</Text>
 
-      <View style={styles.ratingCard}>
-        <Text style={styles.ratingNumber}>
-          {averageRating > 0 ? averageRating.toFixed(1) : '—'} ★
-        </Text>
+            {location ? (
+              <Text style={styles.location}>{location}</Text>
+            ) : null}
+          </View>
 
-        <Text style={styles.ratingLabel}>
-          {reviews.length}{' '}
-          {reviews.length === 1 ? 'review' : 'reviews'}
-        </Text>
-      </View>
+          <View style={styles.headerRating}>
+            <Text style={styles.ratingNumber}>
+              {averageRating > 0 ? averageRating.toFixed(1) : '—'} ★
+            </Text>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Dishes</Text>
+            <Text style={styles.ratingLabel}>
+              {totalReviewCount}{' '}
+              {totalReviewCount === 1 ? 'review' : 'reviews'}
+            </Text>
+          </View>
+        </View>
 
-        {dishes.length === 0 ? (
-          <Text style={styles.emptyText}>
-            No dishes logged yet.
-          </Text>
-        ) : (
-          dishes.map((dish) => (
-            <View key={dish.id} style={styles.dishRow}>
-              <View style={styles.dishInfo}>
-                <Text style={styles.dishName}>
-                  {dish.name}
-                </Text>
+        <AddToListButton listType="restaurant" targetId={restaurant.id} />
 
-                <Text style={styles.dishSubtext}>
-                  {dish.reviewCount}{' '}
-                  {dish.reviewCount === 1 ? 'review' : 'reviews'}
-                </Text>
-              </View>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Menu</Text>
 
-              <Text style={styles.dishRating}>
-                {dish.averageRating > 0
-                  ? `${dish.averageRating.toFixed(1)} ★`
-                  : '—'}
-              </Text>
-            </View>
-          ))
-        )}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Recent Reviews</Text>
-
-        {reviews.length === 0 ? (
-          <Text style={styles.emptyText}>
-            No reviews yet.
-          </Text>
-        ) : (
-          reviews.map((review) => (
-            <TouchableOpacity
-              key={review.id}
-              style={styles.reviewCard}
-              onPress={() =>
-                router.push({
-                  pathname: '/review/[id]',
-                  params: { id: review.id },
-                })
-              }
-            >
-              <View style={styles.reviewTopRow}>
-                <View style={styles.reviewInfo}>
-                  <Text style={styles.reviewer}>
-                    {review.profiles?.display_name ||
-                      review.profiles?.username ||
-                      'User'}
+          {dishes.length === 0 ? (
+            <Text style={styles.emptyText}>
+              No dishes logged yet.
+            </Text>
+          ) : (
+            dishes.map((dish) => (
+              <TouchableOpacity
+                key={dish.id}
+                style={styles.dishRow}
+                onPress={() =>
+                  router.push({
+                    pathname: '/dish/[id]',
+                    params: { id: dish.id },
+                  })
+                }
+              >
+                <View style={styles.dishInfo}>
+                  <Text style={styles.dishName}>
+                    {dish.name}
                   </Text>
 
-                  <Text style={styles.reviewDish}>
-                    {review.dishes?.name ?? 'Unknown dish'}
+                  <Text style={styles.dishSubtext}>
+                    {dish.reviewCount}{' '}
+                    {dish.reviewCount === 1 ? 'review' : 'reviews'}
                   </Text>
                 </View>
 
-                <Text style={styles.reviewRating}>
-                  {review.rating}★
+                <Text style={styles.dishRating}>
+                  {dish.averageRating > 0
+                    ? `${dish.averageRating.toFixed(1)} ★`
+                    : '—'}
                 </Text>
-              </View>
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
 
-              {review.review_text ? (
-                <Text
-                  style={styles.reviewText}
-                  numberOfLines={3}
-                >
-                  {review.review_text}
-                </Text>
-              ) : null}
-            </TouchableOpacity>
-          ))
-        )}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Recent Reviews</Text>
+
+          {reviews.length === 0 ? (
+            <Text style={styles.emptyText}>
+              No reviews yet.
+            </Text>
+          ) : (
+            reviews.map((review) => (
+              <TouchableOpacity
+                key={review.id}
+                style={styles.reviewCard}
+                onPress={() =>
+                  router.push({
+                    pathname: '/review/[id]',
+                    params: { id: review.id },
+                  })
+                }
+              >
+                <View style={styles.reviewTopRow}>
+                  <View style={styles.reviewInfo}>
+                    <Text style={styles.reviewer}>
+                      {review.profiles?.display_name ||
+                        review.profiles?.username ||
+                        'User'}
+                    </Text>
+
+                    <Text style={styles.reviewDish}>
+                      {review.dishes?.name ?? 'Unknown dish'}
+                    </Text>
+                  </View>
+
+                  <Text style={styles.reviewRating}>
+                    {review.rating}★
+                  </Text>
+                </View>
+
+                {review.review_text ? (
+                  <Text
+                    style={styles.reviewText}
+                    numberOfLines={3}
+                  >
+                    {review.review_text}
+                  </Text>
+                ) : null}
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
       </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
+    flex: 1,
+    backgroundColor: Palette.background,
+  },
+  scrollContent: {
     flexGrow: 1,
-    padding: 24,
-    paddingTop: 70,
     paddingBottom: 50,
-    backgroundColor: '#ffffff',
+  },
+  photoPlaceholder: {
+    width: '100%',
+    height: 220,
+    backgroundColor: Palette.elevated,
+  },
+  container: {
+    padding: 24,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  headerInfo: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  headerRating: {
+    alignItems: 'flex-end',
   },
   centered: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   notFound: {
     fontSize: 16,
-    color: '#666666',
+    color: Palette.textSecondary,
   },
   title: {
+    color: Palette.text,
     fontSize: 30,
     fontWeight: '700',
   },
   location: {
     fontSize: 16,
-    color: '#666666',
+    color: Palette.textSecondary,
     marginTop: 6,
   },
-  ratingCard: {
-    marginTop: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: '#eeeeee',
-    borderRadius: 14,
-    alignItems: 'center',
-  },
   ratingNumber: {
-    fontSize: 28,
+    color: Palette.accent,
+    fontSize: 26,
     fontWeight: '700',
   },
   ratingLabel: {
     fontSize: 14,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 4,
   },
   section: {
     marginTop: 30,
   },
   sectionTitle: {
+    color: Palette.text,
     fontSize: 21,
     fontWeight: '700',
     marginBottom: 10,
   },
   emptyText: {
     fontSize: 15,
-    color: '#777777',
+    color: Palette.textMuted,
   },
   dishRow: {
     flexDirection: 'row',
@@ -371,29 +415,31 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
+    borderBottomColor: Palette.border,
   },
   dishInfo: {
     flex: 1,
     paddingRight: 16,
   },
   dishName: {
+    color: Palette.text,
     fontSize: 17,
     fontWeight: '600',
   },
   dishSubtext: {
     fontSize: 13,
-    color: '#777777',
+    color: Palette.textMuted,
     marginTop: 3,
   },
   dishRating: {
+    color: Palette.accent,
     fontSize: 16,
     fontWeight: '700',
   },
   reviewCard: {
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
+    borderBottomColor: Palette.border,
   },
   reviewTopRow: {
     flexDirection: 'row',
@@ -405,19 +451,22 @@ const styles = StyleSheet.create({
     paddingRight: 16,
   },
   reviewer: {
+    color: Palette.text,
     fontSize: 15,
     fontWeight: '700',
   },
   reviewDish: {
     fontSize: 14,
-    color: '#666666',
+    color: Palette.textSecondary,
     marginTop: 3,
   },
   reviewRating: {
+    color: Palette.accent,
     fontSize: 16,
     fontWeight: '700',
   },
   reviewText: {
+    color: Palette.text,
     fontSize: 15,
     lineHeight: 21,
     marginTop: 9,

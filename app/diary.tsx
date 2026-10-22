@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
+import { Palette } from '@/constants/theme';
 
 type DiaryEntry = {
   id: string;
@@ -201,28 +202,29 @@ const styles = StyleSheet.create({
     padding: 24,
     paddingTop: 70,
     paddingBottom: 50,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   centered: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.background,
   },
   title: {
+    color: Palette.text,
     fontSize: 30,
     fontWeight: '700',
   },
   subtitle: {
     fontSize: 16,
-    color: '#666666',
+    color: Palette.textSecondary,
     marginTop: 6,
     marginBottom: 26,
   },
   diaryCard: {
     paddingVertical: 18,
     borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
+    borderBottomColor: Palette.border,
   },
   topRow: {
     flexDirection: 'row',
@@ -234,15 +236,17 @@ const styles = StyleSheet.create({
     paddingRight: 16,
   },
   dishName: {
+    color: Palette.text,
     fontSize: 18,
     fontWeight: '700',
   },
   restaurantName: {
     fontSize: 14,
-    color: '#666666',
+    color: Palette.textSecondary,
     marginTop: 3,
   },
   rating: {
+    color: Palette.accent,
     fontSize: 18,
     fontWeight: '700',
   },
@@ -251,9 +255,10 @@ const styles = StyleSheet.create({
     aspectRatio: 4 / 3,
     borderRadius: 12,
     marginTop: 12,
-    backgroundColor: '#eeeeee',
+    backgroundColor: Palette.elevated,
   },
   reviewText: {
+    color: Palette.text,
     fontSize: 15,
     lineHeight: 21,
     marginTop: 10,
@@ -266,15 +271,15 @@ const styles = StyleSheet.create({
   },
   date: {
     fontSize: 12,
-    color: '#999999',
+    color: Palette.textMuted,
   },
   viewReview: {
     fontSize: 12,
-    color: '#777777',
+    color: Palette.textMuted,
     fontWeight: '600',
   },
   emptyText: {
     fontSize: 15,
-    color: '#777777',
+    color: Palette.textMuted,
   },
 });

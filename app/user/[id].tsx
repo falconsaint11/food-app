@@ -13,7 +13,9 @@ import {
   View,
 } from "react-native";
 
-import { supabase } from "@/lib/supabase";
+import { ListsSection } from '@/components/lists-section';
+import { supabase } from '@/lib/supabase';
+import { Palette } from '@/constants/theme';
 
 type PublicProfile = {
   id: string;
@@ -526,7 +528,7 @@ export default function UserProfileScreen() {
   if (!profile) {
     return (
       <View style={styles.centered}>
-        <Text>Profile not found.</Text>
+        <Text style={{ color: Palette.textMuted }}>Profile not found.</Text>
       </View>
     );
   }
@@ -649,8 +651,21 @@ export default function UserProfileScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Top Dishes</Text>
+      <ListsSection
+        userId={id}
+        isOwner={currentUserId === id}
+      />
+
+      <View
+        style={styles.section}
+      >
+        <Text
+          style={
+            styles.sectionTitle
+          }
+        >
+          Top Dishes
+        </Text>
 
         {topDishes.length === 0 ? (
           <View style={styles.emptyCard}>
@@ -840,7 +855,7 @@ const styles = StyleSheet.create({
 
     paddingBottom: 60,
 
-    backgroundColor: "#ffffff",
+    backgroundColor: Palette.background,
   },
 
   centered: {
@@ -850,7 +865,7 @@ const styles = StyleSheet.create({
 
     alignItems: "center",
 
-    backgroundColor: "#ffffff",
+    backgroundColor: Palette.background,
   },
 
   profileHeader: {
@@ -864,7 +879,7 @@ const styles = StyleSheet.create({
 
     borderRadius: 46,
 
-    backgroundColor: "#eeeeee",
+    backgroundColor: Palette.elevated,
   },
 
   avatarPlaceholder: {
@@ -874,7 +889,7 @@ const styles = StyleSheet.create({
 
     borderRadius: 46,
 
-    backgroundColor: "#eeeeee",
+    backgroundColor: Palette.elevated,
 
     justifyContent: "center",
 
@@ -882,12 +897,14 @@ const styles = StyleSheet.create({
   },
 
   avatarText: {
+    color: Palette.text,
     fontSize: 34,
 
     fontWeight: "700",
   },
 
   displayName: {
+    color: Palette.text,
     fontSize: 28,
 
     fontWeight: "700",
@@ -904,7 +921,7 @@ const styles = StyleSheet.create({
 
     marginTop: 3,
 
-    color: "#777777",
+    color: Palette.textMuted,
   },
 
   cityRow: {
@@ -915,10 +932,11 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   cityPin: {
+    color: Palette.text,
     fontSize: 14,
   },
   cityText: {
-    color: "#666666",
+    color: Palette.textSecondary,
     fontSize: 14,
     textAlign: "center",
   },
@@ -931,7 +949,7 @@ const styles = StyleSheet.create({
 
     lineHeight: 21,
 
-    color: "#333333",
+    color: Palette.textBody,
 
     maxWidth: 320,
   },
@@ -941,7 +959,7 @@ const styles = StyleSheet.create({
 
     alignItems: "center",
 
-    backgroundColor: "#111111",
+    backgroundColor: Palette.accent,
 
     paddingHorizontal: 22,
 
@@ -953,7 +971,7 @@ const styles = StyleSheet.create({
   },
 
   followButtonText: {
-    color: "#ffffff",
+    color: Palette.text,
 
     fontSize: 14,
 
@@ -961,15 +979,15 @@ const styles = StyleSheet.create({
   },
 
   followingButton: {
-    backgroundColor: "#ffffff",
+    backgroundColor: Palette.background,
 
     borderWidth: 1,
 
-    borderColor: "#cccccc",
+    borderColor: Palette.borderStrong,
   },
 
   followingButtonText: {
-    color: "#111111",
+    color: Palette.text,
   },
 
   statsCard: {
@@ -977,7 +995,7 @@ const styles = StyleSheet.create({
 
     borderWidth: 1,
 
-    borderColor: "#eeeeee",
+    borderColor: Palette.border,
 
     borderRadius: 14,
 
@@ -995,10 +1013,11 @@ const styles = StyleSheet.create({
   statDivider: {
     width: 1,
 
-    backgroundColor: "#eeeeee",
+    backgroundColor: Palette.elevated,
   },
 
   statNumber: {
+    color: Palette.text,
     fontSize: 20,
 
     fontWeight: "700",
@@ -1009,7 +1028,7 @@ const styles = StyleSheet.create({
 
     marginTop: 4,
 
-    color: "#777777",
+    color: Palette.textMuted,
   },
 
   socialStats: {
@@ -1029,6 +1048,7 @@ const styles = StyleSheet.create({
   },
 
   socialNumber: {
+    color: Palette.text,
     fontSize: 16,
 
     fontWeight: "700",
@@ -1037,7 +1057,7 @@ const styles = StyleSheet.create({
   socialLabel: {
     fontSize: 13,
 
-    color: "#666666",
+    color: Palette.textSecondary,
 
     marginTop: 2,
   },
@@ -1047,6 +1067,7 @@ const styles = StyleSheet.create({
   },
 
   sectionTitle: {
+    color: Palette.text,
     fontSize: 21,
 
     fontWeight: "700",
@@ -1069,7 +1090,7 @@ const styles = StyleSheet.create({
 
     borderWidth: 1,
 
-    borderColor: "#eeeeee",
+    borderColor: Palette.border,
 
     borderRadius: 14,
 
@@ -1081,7 +1102,7 @@ const styles = StyleSheet.create({
   rankBadge: {
     alignSelf: "flex-start",
 
-    backgroundColor: "#111111",
+    backgroundColor: Palette.accent,
 
     borderRadius: 7,
 
@@ -1093,7 +1114,7 @@ const styles = StyleSheet.create({
   },
 
   rankBadgeText: {
-    color: "#ffffff",
+    color: Palette.text,
 
     fontSize: 12,
 
@@ -1101,6 +1122,7 @@ const styles = StyleSheet.create({
   },
 
   featureName: {
+    color: Palette.text,
     fontSize: 16,
 
     fontWeight: "700",
@@ -1111,7 +1133,7 @@ const styles = StyleSheet.create({
   featureSubtext: {
     fontSize: 12,
 
-    color: "#777777",
+    color: Palette.textMuted,
 
     marginTop: 5,
   },
@@ -1119,7 +1141,7 @@ const styles = StyleSheet.create({
   emptyCard: {
     borderWidth: 1,
 
-    borderColor: "#eeeeee",
+    borderColor: Palette.border,
 
     borderRadius: 12,
 
@@ -1129,7 +1151,7 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
 
-    color: "#777777",
+    color: Palette.textMuted,
   },
 
   diaryCard: {
@@ -1137,7 +1159,7 @@ const styles = StyleSheet.create({
 
     borderBottomWidth: 1,
 
-    borderBottomColor: "#eeeeee",
+    borderBottomColor: Palette.border,
   },
 
   diaryContentRow: {
@@ -1155,7 +1177,7 @@ const styles = StyleSheet.create({
 
     marginRight: 13,
 
-    backgroundColor: "#eeeeee",
+    backgroundColor: Palette.elevated,
   },
 
   diaryMainContent: {
@@ -1181,6 +1203,7 @@ const styles = StyleSheet.create({
   },
 
   dishName: {
+    color: Palette.text,
     fontSize: 17,
 
     fontWeight: "700",
@@ -1189,12 +1212,13 @@ const styles = StyleSheet.create({
   restaurantName: {
     fontSize: 13,
 
-    color: "#666666",
+    color: Palette.textSecondary,
 
     marginTop: 3,
   },
 
   rating: {
+    color: Palette.accent,
     fontSize: 17,
 
     fontWeight: "700",
@@ -1203,7 +1227,7 @@ const styles = StyleSheet.create({
   dateText: {
     fontSize: 11,
 
-    color: "#999999",
+    color: Palette.textMuted,
 
     marginTop: 3,
   },
@@ -1215,13 +1239,13 @@ const styles = StyleSheet.create({
 
     lineHeight: 19,
 
-    color: "#333333",
+    color: Palette.textBody,
   },
 
   viewReview: {
     fontSize: 12,
 
-    color: "#777777",
+    color: Palette.textMuted,
 
     fontWeight: "600",
 
