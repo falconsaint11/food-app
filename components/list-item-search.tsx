@@ -40,6 +40,7 @@ type GooglePlaceDetails = {
   state: string | null;
   latitude: number | null;
   longitude: number | null;
+  website?: string | null;
 };
 
 type ListItemSearchProps = {
@@ -241,6 +242,7 @@ export function ListItemSearch({ listType, onSelect }: ListItemSearchProps) {
         latitude: details.latitude,
         longitude: details.longitude,
         google_place_id: details.google_place_id,
+        website: details.website ?? null,
       })
       .select('id')
       .single();

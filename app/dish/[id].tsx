@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import { AddToListButton } from '@/components/add-to-list-button';
+import { dishKey, getBrandLocationIds } from '@/lib/brands';
 import { supabase } from '@/lib/supabase';
 import { Palette } from '@/constants/theme';
 
@@ -22,7 +23,10 @@ type Dish = {
   restaurants: {
     id: string;
     name: string;
-    city: string | null;
+    brand_id: string | null;
+    brands: {
+      name: string;
+    } | null;
   } | null;
 };
 
@@ -71,7 +75,8 @@ export default function DishDetailScreen() {
         restaurants (
           id,
           name,
-          city
+          brand_id,
+          brands (name)
         )
       `)
       .eq('id', id)
@@ -89,7 +94,38 @@ export default function DishDetailScreen() {
       return;
     }
 
-    setDish(dishData as unknown as Dish);
+    const dishRow = dishData as unknown as Dish;
+    setDish(dishRow);
+
+    // The same dish at other locations of this brand counts as one dish.
+    let sameDishIds = [dishRow.id];
+
+    if (dishRow.restaurants) {
+      try {
+        const locationIds = await getBrandLocationIds(
+          dishRow.restaurants.id,
+          dishRow.restaurants.brand_id
+        );
+
+        const { data: siblingData, error: siblingError } = await supabase
+          .from('dishes')
+          .select('id, name')
+          .in('restaurant_id', locationIds);
+
+        if (siblingError) throw new Error(siblingError.message);
+
+        sameDishIds = (siblingData ?? [])
+          .filter((sibling) => dishKey(sibling.name) === dishKey(dishRow.name))
+          .map((sibling) => sibling.id as string);
+      } catch (error) {
+        setLoading(false);
+        Alert.alert(
+          'Dish error',
+          error instanceof Error ? error.message : 'Could not load this dish.'
+        );
+        return;
+      }
+    }
 
     const { data: reviewData, error: reviewError } = await supabase
       .from('reviews')
@@ -105,7 +141,7 @@ export default function DishDetailScreen() {
           display_name
         )
       `)
-      .eq('dish_id', id)
+      .in('dish_id', sameDishIds)
       .order('created_at', { ascending: false });
 
     if (reviewError) {
@@ -133,7 +169,7 @@ export default function DishDetailScreen() {
     const { count, error: rankingError } = await supabase
       .from('dish_rankings')
       .select('*', { count: 'exact', head: true })
-      .eq('dish_id', id);
+      .in('dish_id', sameDishIds);
 
     setLoading(false);
 
@@ -179,10 +215,7 @@ export default function DishDetailScreen() {
           }
         >
           <Text style={styles.restaurantLink}>
-            {dish.restaurants.name}
-            {dish.restaurants.city
-              ? ` · ${dish.restaurants.city}`
-              : ''}
+            {dish.restaurants.brands?.name ?? dish.restaurants.name}
           </Text>
         </TouchableOpacity>
       ) : null}

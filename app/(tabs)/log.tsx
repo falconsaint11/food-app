@@ -19,6 +19,8 @@ import {
   View,
 } from "react-native";
 
+import { StarRatingInput } from "@/components/star-rating-input";
+import { dishKey, getBrandLocationIds } from "@/lib/brands";
 import { supabase } from "@/lib/supabase";
 import { Palette } from "@/constants/theme";
 
@@ -44,6 +46,8 @@ type DishResult = {
   id: string;
 
   name: string;
+
+  restaurant_id: string;
 };
 
 type GooglePlaceSuggestion = {
@@ -80,6 +84,8 @@ type GooglePlaceDetails = {
   latitude: number | null;
 
   longitude: number | null;
+
+  website?: string | null;
 };
 
 type TaggableFriend = {
@@ -107,6 +113,8 @@ export default function LogScreen() {
 
   const [googlePlaceId, setGooglePlaceId] = useState<string | null>(null);
 
+  const [website, setWebsite] = useState<string | null>(null);
+
   const [address, setAddress] = useState("");
 
   const [city, setCity] = useState("");
@@ -129,13 +137,19 @@ export default function LogScreen() {
 
   const [selectedDishId, setSelectedDishId] = useState<string | null>(null);
 
+  // A suggestion can come from another location of the same brand.
+  const [selectedDishRestaurantId, setSelectedDishRestaurantId] = useState<
+    string | null
+  >(null);
+
+  // Every saved location of the selected restaurant's brand, so dish
+  // suggestions cover the whole chain's menu.
+  const [menuLocationIds, setMenuLocationIds] = useState<string[]>([]);
+
   const [rating, setRating] = useState(0);
 
-  const [ratingWidth, setRatingWidth] = useState(0);
-
-  const [ratingLeftX, setRatingLeftX] = useState(0);
-
-  const ratingRowRef = useRef<View>(null);
+  // Optional, separate from the dish rating. 0 means "not rated".
+  const [restaurantRating, setRestaurantRating] = useState(0);
 
   const [reviewText, setReviewText] = useState("");
   const [friends, setFriends] = useState<TaggableFriend[]>([]);
@@ -201,6 +215,113 @@ export default function LogScreen() {
 
     loadSearchLocation();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMenuLocations() {
+      try {
+        if (selectedRestaurantId) {
+          const { data, error } = await supabase
+            .from("restaurants")
+            .select("brand_id")
+            .eq("id", selectedRestaurantId)
+            .maybeSingle();
+
+          if (error) throw new Error(error.message);
+
+          const ids = await getBrandLocationIds(
+            selectedRestaurantId,
+            data?.brand_id ?? null,
+          );
+
+          if (!cancelled) setMenuLocationIds(ids);
+          return;
+        }
+
+        // A Google place we haven't saved yet may still belong to a known chain.
+        if (googlePlaceId) {
+          const { data: brandId, error } = await supabase.rpc("find_brand", {
+            p_name: restaurantName,
+            p_website: website,
+          });
+
+          if (error) throw new Error(error.message);
+
+          if (!brandId) {
+            if (!cancelled) setMenuLocationIds([]);
+            return;
+          }
+
+          const { data, error: locationsError } = await supabase
+            .from("restaurants")
+            .select("id")
+            .eq("brand_id", brandId);
+
+          if (locationsError) throw new Error(locationsError.message);
+
+          if (!cancelled) {
+            setMenuLocationIds((data ?? []).map((row) => row.id as string));
+          }
+          return;
+        }
+
+        if (!cancelled) setMenuLocationIds([]);
+      } catch (error) {
+        console.log("Could not load brand menu:", error);
+        if (!cancelled) setMenuLocationIds([]);
+      }
+    }
+
+    loadMenuLocations();
+
+    return () => {
+      cancelled = true;
+    };
+    // restaurantName and website are set together with googlePlaceId.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRestaurantId, googlePlaceId]);
+
+  // Show the user's existing rating for this location; logging again updates it.
+  useEffect(() => {
+    if (!selectedRestaurantId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadExistingRestaurantRating() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from("restaurant_ratings")
+        .select("rating")
+        .eq("user_id", user.id)
+        .eq("restaurant_id", selectedRestaurantId)
+        .maybeSingle();
+
+      if (error) {
+        console.log("Restaurant rating lookup error:", error.message);
+        return;
+      }
+
+      if (!cancelled && data) {
+        setRestaurantRating((current) =>
+          current > 0 ? current : Number(data.rating),
+        );
+      }
+    }
+
+    loadExistingRestaurantRating();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRestaurantId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -327,6 +448,10 @@ export default function LogScreen() {
     setSelectedRestaurantId(null);
 
     setGooglePlaceId(null);
+
+    setWebsite(null);
+
+    setRestaurantRating(0);
 
     setAddress("");
 
@@ -535,6 +660,8 @@ export default function LogScreen() {
 
       setGooglePlaceId(details.google_place_id);
 
+      setWebsite(details.website ?? null);
+
       setAddress(details.address ?? "");
 
       setCity(details.city ?? "");
@@ -656,7 +783,7 @@ export default function LogScreen() {
       return;
     }
 
-    if (!selectedRestaurantId) {
+    if (menuLocationIds.length === 0) {
       setDishResults([]);
 
       return;
@@ -666,13 +793,13 @@ export default function LogScreen() {
 
       .from("dishes")
 
-      .select("id, name")
+      .select("id, name, restaurant_id")
 
-      .eq("restaurant_id", selectedRestaurantId)
+      .in("restaurant_id", menuLocationIds)
 
       .ilike("name", `%${trimmed}%`)
 
-      .limit(8);
+      .limit(30);
 
     if (error) {
       console.log("Dish search error:", error.message);
@@ -680,13 +807,28 @@ export default function LogScreen() {
       return;
     }
 
-    setDishResults(data ?? []);
+    // Each location has its own row for the same dish; show each name once,
+    // preferring this location's row.
+    const uniqueDishes = new Map<string, DishResult>();
+
+    for (const dish of (data ?? []) as DishResult[]) {
+      const key = dishKey(dish.name);
+      const existing = uniqueDishes.get(key);
+
+      if (!existing || dish.restaurant_id === selectedRestaurantId) {
+        uniqueDishes.set(key, dish);
+      }
+    }
+
+    setDishResults([...uniqueDishes.values()].slice(0, 8));
   }
 
   function selectDish(dish: DishResult) {
     setDishName(dish.name);
 
     setSelectedDishId(dish.id);
+
+    setSelectedDishRestaurantId(dish.restaurant_id);
 
     setDishResults([]);
   }
@@ -836,6 +978,8 @@ export default function LogScreen() {
         longitude,
 
         google_place_id: googlePlaceId,
+
+        website,
       })
 
       .select("id")
@@ -850,7 +994,9 @@ export default function LogScreen() {
   }
 
   async function findOrCreateDish(restaurantId: string) {
-    if (selectedDishId) {
+    // A dish picked from another location of the brand gets its own row here,
+    // so the review stays tied to the location the user actually visited.
+    if (selectedDishId && selectedDishRestaurantId === restaurantId) {
       return selectedDishId;
     }
 
@@ -999,11 +1145,37 @@ export default function LogScreen() {
         }
       }
 
+      let restaurantRatingSaved = true;
+      if (restaurantRating > 0) {
+        const { error: restaurantRatingError } = await supabase
+          .from("restaurant_ratings")
+          .upsert(
+            {
+              user_id: user.id,
+              restaurant_id: restaurantId,
+              rating: restaurantRating,
+            },
+            { onConflict: "user_id,restaurant_id" },
+          );
+        if (restaurantRatingError) {
+          console.log(
+            "Restaurant rating error:",
+            restaurantRatingError.message,
+          );
+          restaurantRatingSaved = false;
+        }
+      }
+
+      const failedExtras = [
+        !tagsSaved && "the friend tags",
+        !restaurantRatingSaved && "the restaurant rating",
+      ].filter(Boolean);
+
       Alert.alert(
-        tagsSaved ? "Logged!" : "Logged, but tags failed",
-        tagsSaved
+        failedExtras.length === 0 ? "Logged!" : "Logged, with a problem",
+        failedExtras.length === 0
           ? `${dishName.trim()} was added to your diary.`
-          : `${dishName.trim()} was added to your diary, but the friend tags could not be saved.`,
+          : `${dishName.trim()} was added to your diary, but ${failedExtras.join(" and ")} could not be saved.`,
       );
 
       setRestaurantName("");
@@ -1015,6 +1187,8 @@ export default function LogScreen() {
       setSelectedRestaurantId(null);
 
       setGooglePlaceId(null);
+
+      setWebsite(null);
 
       setAddress("");
 
@@ -1034,6 +1208,8 @@ export default function LogScreen() {
 
       setRating(0);
 
+      setRestaurantRating(0);
+
       setReviewText("");
 
       setPhotoUri(null);
@@ -1049,56 +1225,6 @@ export default function LogScreen() {
     } finally {
       setLoading(false);
     }
-  }
-
-  function updateRatingFromPageX(pageX: number) {
-    if (ratingWidth <= 0) {
-      return;
-    }
-
-    const relativeX = pageX - ratingLeftX;
-
-    const clampedX = Math.max(0, Math.min(relativeX, ratingWidth));
-
-    const rawRating = (clampedX / ratingWidth) * 5;
-
-    const snappedRating = Math.max(
-      0.5,
-
-      Math.min(5, Math.ceil(rawRating * 2) / 2),
-    );
-
-    setRating(snappedRating);
-  }
-
-  function measureRatingRow() {
-    ratingRowRef.current?.measureInWindow((x) => {
-      setRatingLeftX(x);
-    });
-  }
-
-  function getRatingLabel(value: number) {
-    if (value === 0.5) return "Horrible";
-
-    if (value === 1) return "Awful";
-
-    if (value === 1.5) return "Bad";
-
-    if (value === 2) return "Below Average";
-
-    if (value === 2.5) return "Mid";
-
-    if (value === 3) return "Decent";
-
-    if (value === 3.5) return "Good";
-
-    if (value === 4) return "Great";
-
-    if (value === 4.5) return "Amazing";
-
-    if (value === 5) return "Perfection";
-
-    return "Tap or drag to rate";
   }
 
   const creatingNewRestaurant =
@@ -1377,7 +1503,7 @@ export default function LogScreen() {
             !selectedRestaurantId && styles.inputNeedsRestaurant,
           ]}
           placeholder={
-            selectedRestaurantId
+            menuLocationIds.length > 0
               ? "Search or add a menu item"
               : "Enter dish name"
           }
@@ -1428,65 +1554,7 @@ export default function LogScreen() {
 
         <Text style={styles.label}>Rating</Text>
 
-        <View style={styles.ratingSection}>
-          <View
-            ref={ratingRowRef}
-            style={styles.ratingTouchArea}
-            onLayout={(event) => {
-              setRatingWidth(event.nativeEvent.layout.width);
-
-              requestAnimationFrame(measureRatingRow);
-            }}
-            onStartShouldSetResponder={() => true}
-            onMoveShouldSetResponder={() => true}
-            onResponderTerminationRequest={() => false}
-            onResponderGrant={(event) => {
-              updateRatingFromPageX(event.nativeEvent.pageX);
-            }}
-            onResponderMove={(event) => {
-              updateRatingFromPageX(event.nativeEvent.pageX);
-            }}
-          >
-            {[1, 2, 3, 4, 5].map((star) => {
-              const starFill = rating - (star - 1);
-
-              const fillWidth = starFill >= 1 ? 50 : starFill >= 0.5 ? 25 : 0;
-
-              return (
-                <View
-                  key={star}
-                  style={styles.starContainer}
-                  pointerEvents="none"
-                >
-                  <Text style={[styles.star, styles.emptyStar]}>★</Text>
-
-                  <View
-                    style={[
-                      styles.starFillClip,
-
-                      {
-                        width: fillWidth,
-                      },
-                    ]}
-                    pointerEvents="none"
-                  >
-                    <Text style={[styles.star, styles.filledStar]}>★</Text>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-
-          <Text style={styles.dragHint}>Tap or drag across the stars</Text>
-
-          <View style={styles.ratingSummary}>
-            <Text style={styles.ratingNumber}>
-              {rating > 0 ? rating.toFixed(1) : "—"}
-            </Text>
-
-            <Text style={styles.ratingLabel}>{getRatingLabel(rating)}</Text>
-          </View>
-        </View>
+        <StarRatingInput value={rating} onChange={setRating} />
 
         <Text style={styles.label}>Review</Text>
 
@@ -1497,6 +1565,23 @@ export default function LogScreen() {
           multiline
           value={reviewText}
           onChangeText={setReviewText}
+        />
+
+        <View style={styles.optionalLabelRow}>
+          <Text style={styles.label}>
+            How was the restaurant? (Optional)
+          </Text>
+
+          {restaurantRating > 0 ? (
+            <TouchableOpacity onPress={() => setRestaurantRating(0)}>
+              <Text style={styles.clearRatingText}>Clear</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
+        <StarRatingInput
+          value={restaurantRating}
+          onChange={setRestaurantRating}
         />
 
         <Text style={styles.label}>Who'd you go with? (Optional)</Text>
@@ -1936,106 +2021,20 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
-  ratingSection: {
-    marginBottom: 22,
-  },
-
-  ratingTouchArea: {
+  optionalLabelRow: {
     flexDirection: "row",
 
-    alignSelf: "flex-start",
-
-    alignItems: "center",
-
-    width: 250,
-
-    height: 52,
-  },
-
-  starContainer: {
-    width: 50,
-
-    height: 52,
-
-    position: "relative",
-
-    justifyContent: "center",
-  },
-
-  star: {
-    color: Palette.text,
-    fontSize: 42,
-
-    lineHeight: 48,
-  },
-
-  emptyStar: {
-    color: Palette.borderStrong,
-
-    position: "absolute",
-
-    left: 0,
-
-    top: 2,
-  },
-
-  starFillClip: {
-    position: "absolute",
-
-    left: 0,
-
-    top: 2,
-
-    height: 48,
-
-    overflow: "hidden",
-  },
-
-  filledStar: {
-    color: Palette.accent,
-
-    position: "absolute",
-
-    left: 0,
-
-    top: 0,
-
-    width: 50,
-  },
-
-  dragHint: {
-    fontSize: 12,
-
-    color: Palette.textMuted,
-
-    marginTop: 4,
-  },
-
-  ratingSummary: {
-    marginTop: 12,
-
-    flexDirection: "row",
+    justifyContent: "space-between",
 
     alignItems: "baseline",
   },
 
-  ratingNumber: {
-    color: Palette.accent,
-    fontSize: 26,
+  clearRatingText: {
+    fontSize: 13,
 
-    fontWeight: "700",
-
-    minWidth: 52,
-  },
-
-  ratingLabel: {
-    fontSize: 16,
+    color: Palette.textMuted,
 
     fontWeight: "600",
-
-    color: Palette.textSecondary,
-
-    marginLeft: 8,
   },
 
   reviewInput: {

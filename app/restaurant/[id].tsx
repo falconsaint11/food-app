@@ -11,15 +11,17 @@ import {
 } from 'react-native';
 
 import { AddToListButton } from '@/components/add-to-list-button';
+import { dishKey, getBrandLocationIds } from '@/lib/brands';
 import { supabase } from '@/lib/supabase';
 import { Palette } from '@/constants/theme';
 
 type Restaurant = {
   id: string;
   name: string;
-  city: string | null;
-  state: string | null;
-  country: string | null;
+  brand_id: string | null;
+  brands: {
+    name: string;
+  } | null;
 };
 
 type DishSummary = {
@@ -32,6 +34,7 @@ type DishSummary = {
 type RecentReview = {
   id: string;
   user_id: string;
+  dish_id: string;
   rating: number;
   review_text: string | null;
   created_at: string;
@@ -45,14 +48,16 @@ type RecentReview = {
   } | null;
 };
 
+const TOP_ITEM_COUNT = 3;
+
 export default function RestaurantDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
   const [dishes, setDishes] = useState<DishSummary[]>([]);
   const [reviews, setReviews] = useState<RecentReview[]>([]);
-  const [averageRating, setAverageRating] = useState(0);
-  const [totalReviewCount, setTotalReviewCount] = useState(0);
+  const [restaurantRating, setRestaurantRating] = useState(0);
+  const [ratingCount, setRatingCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useFocusEffect(
@@ -68,122 +73,188 @@ export default function RestaurantDetailScreen() {
 
     setLoading(true);
 
-    const { data: restaurantData, error: restaurantError } =
-      await supabase
+    try {
+      const { data: restaurantData, error: restaurantError } = await supabase
         .from('restaurants')
-        .select('id, name, city, state, country')
+        .select('id, name, brand_id, brands (name)')
         .eq('id', id)
         .maybeSingle();
 
-    if (restaurantError) {
-      setLoading(false);
-      Alert.alert('Restaurant error', restaurantError.message);
-      return;
-    }
+      if (restaurantError) throw new Error(restaurantError.message);
 
-    if (!restaurantData) {
-      setRestaurant(null);
-      setLoading(false);
-      return;
-    }
-
-    setRestaurant(restaurantData);
-
-    const { data: dishData, error: dishError } = await supabase
-      .from('dishes')
-      .select('id, name')
-      .eq('restaurant_id', id);
-
-    if (dishError) {
-      setLoading(false);
-      Alert.alert('Dish error', dishError.message);
-      return;
-    }
-
-    const dishIds = (dishData ?? []).map((dish) => dish.id);
-
-    if (dishIds.length === 0) {
-      setDishes([]);
-      setReviews([]);
-      setAverageRating(0);
-      setTotalReviewCount(0);
-      setLoading(false);
-      return;
-    }
-
-    const { data: reviewData, error: reviewError } = await supabase
-      .from('reviews')
-      .select(`
-        id,
-        user_id,
-        dish_id,
-        rating,
-        review_text,
-        created_at,
-        profiles:user_id (
-          username,
-          display_name
-        ),
-        dishes (
-          id,
-          name
-        )
-      `)
-      .in('dish_id', dishIds)
-      .order('created_at', { ascending: false });
-
-    setLoading(false);
-
-    if (reviewError) {
-      Alert.alert('Review error', reviewError.message);
-      return;
-    }
-
-    const allReviews = (reviewData ?? []) as any[];
-    setTotalReviewCount(allReviews.length);
-
-    if (allReviews.length > 0) {
-      const total = allReviews.reduce(
-        (sum, review) => sum + Number(review.rating),
-        0
-      );
-
-      setAverageRating(total / allReviews.length);
-    } else {
-      setAverageRating(0);
-    }
-
-    const dishSummaries: DishSummary[] = (dishData ?? []).map((dish) => {
-      const dishReviews = allReviews.filter(
-        (review) => review.dish_id === dish.id
-      );
-
-      const dishAverage =
-        dishReviews.length > 0
-          ? dishReviews.reduce(
-              (sum, review) => sum + Number(review.rating),
-              0
-            ) / dishReviews.length
-          : 0;
-
-      return {
-        id: dish.id,
-        name: dish.name,
-        averageRating: dishAverage,
-        reviewCount: dishReviews.length,
-      };
-    });
-
-    dishSummaries.sort((a, b) => {
-      if (b.averageRating !== a.averageRating) {
-        return b.averageRating - a.averageRating;
+      if (!restaurantData) {
+        setRestaurant(null);
+        return;
       }
 
-      return b.reviewCount - a.reviewCount;
-    });
+      const restaurantRow = restaurantData as unknown as Restaurant;
+      setRestaurant(restaurantRow);
 
-    setDishes(dishSummaries);
-    setReviews(allReviews.slice(0, 10) as unknown as RecentReview[]);
+      // Pool every location of this brand into one public profile.
+      const locationIds = await getBrandLocationIds(
+        restaurantRow.id,
+        restaurantRow.brand_id
+      );
+
+      const { data: ratingData, error: ratingError } = await supabase
+        .from('restaurant_ratings')
+        .select('user_id, rating')
+        .in('restaurant_id', locationIds);
+
+      if (ratingError) throw new Error(ratingError.message);
+
+      // Average each person's ratings first so someone who rated five
+      // locations counts the same as someone who rated one.
+      const ratingsByUser = new Map<string, number[]>();
+      for (const row of ratingData ?? []) {
+        ratingsByUser.set(row.user_id, [
+          ...(ratingsByUser.get(row.user_id) ?? []),
+          Number(row.rating),
+        ]);
+      }
+
+      const perUserAverages = [...ratingsByUser.values()].map(
+        (ratings) =>
+          ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length
+      );
+
+      setRatingCount(perUserAverages.length);
+      setRestaurantRating(
+        perUserAverages.length > 0
+          ? perUserAverages.reduce((sum, rating) => sum + rating, 0) /
+              perUserAverages.length
+          : 0
+      );
+
+      const { data: dishData, error: dishError } = await supabase
+        .from('dishes')
+        .select('id, name')
+        .in('restaurant_id', locationIds);
+
+      if (dishError) throw new Error(dishError.message);
+
+      const dishIds = (dishData ?? []).map((dish) => dish.id as string);
+
+      const { data: reviewData, error: reviewError } =
+        dishIds.length > 0
+          ? await supabase
+              .from('reviews')
+              .select(`
+                id,
+                user_id,
+                dish_id,
+                rating,
+                review_text,
+                created_at,
+                profiles:user_id (
+                  username,
+                  display_name
+                ),
+                dishes (
+                  id,
+                  name
+                )
+              `)
+              .in('dish_id', dishIds)
+              .order('created_at', { ascending: false })
+          : { data: [], error: null };
+
+      if (reviewError) throw new Error(reviewError.message);
+
+      const allReviews = (reviewData ?? []) as unknown as RecentReview[];
+
+      const ratingsByDishId = new Map<string, number[]>();
+      for (const review of allReviews) {
+        ratingsByDishId.set(review.dish_id, [
+          ...(ratingsByDishId.get(review.dish_id) ?? []),
+          Number(review.rating),
+        ]);
+      }
+
+      // Merge same-named dishes from different locations into one menu item.
+      // The most-reviewed row is the one the menu links to.
+      const groups = new Map<
+        string,
+        { id: string; name: string; topCount: number; ratings: number[] }
+      >();
+
+      for (const dish of dishData ?? []) {
+        const ratings = ratingsByDishId.get(dish.id) ?? [];
+        const key = dishKey(dish.name);
+        const group = groups.get(key);
+
+        if (!group) {
+          groups.set(key, {
+            id: dish.id,
+            name: dish.name.trim(),
+            topCount: ratings.length,
+            ratings: [...ratings],
+          });
+          continue;
+        }
+
+        group.ratings.push(...ratings);
+        if (ratings.length > group.topCount) {
+          group.id = dish.id;
+          group.topCount = ratings.length;
+        }
+      }
+
+      const dishSummaries: DishSummary[] = [...groups.values()].map(
+        (group) => ({
+          id: group.id,
+          name: group.name,
+          reviewCount: group.ratings.length,
+          averageRating:
+            group.ratings.length > 0
+              ? group.ratings.reduce((sum, rating) => sum + rating, 0) /
+                group.ratings.length
+              : 0,
+        })
+      );
+
+      dishSummaries.sort((a, b) => a.name.localeCompare(b.name));
+
+      setDishes(dishSummaries);
+      setReviews(allReviews.slice(0, 10));
+    } catch (error) {
+      Alert.alert(
+        'Restaurant error',
+        error instanceof Error ? error.message : 'Could not load restaurant.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function renderDishRow(dish: DishSummary) {
+    return (
+      <TouchableOpacity
+        key={dish.id}
+        style={styles.dishRow}
+        onPress={() =>
+          router.push({
+            pathname: '/dish/[id]',
+            params: { id: dish.id },
+          })
+        }
+      >
+        <View style={styles.dishInfo}>
+          <Text style={styles.dishName}>{dish.name}</Text>
+
+          <Text style={styles.dishSubtext}>
+            {dish.reviewCount}{' '}
+            {dish.reviewCount === 1 ? 'review' : 'reviews'}
+          </Text>
+        </View>
+
+        <Text style={styles.dishRating}>
+          {dish.averageRating > 0
+            ? `${dish.averageRating.toFixed(1)} ★`
+            : '—'}
+        </Text>
+      </TouchableOpacity>
+    );
   }
 
   if (loading) {
@@ -204,12 +275,16 @@ export default function RestaurantDetailScreen() {
     );
   }
 
-  const location = [
-    restaurant.city,
-    restaurant.state,
-  ]
-    .filter(Boolean)
-    .join(', ');
+  const topItems = dishes
+    .filter((dish) => dish.reviewCount > 0)
+    .sort((a, b) => {
+      if (b.averageRating !== a.averageRating) {
+        return b.averageRating - a.averageRating;
+      }
+
+      return b.reviewCount - a.reviewCount;
+    })
+    .slice(0, TOP_ITEM_COUNT);
 
   return (
     <ScrollView
@@ -222,26 +297,31 @@ export default function RestaurantDetailScreen() {
       <View style={styles.container}>
         <View style={styles.headerRow}>
           <View style={styles.headerInfo}>
-            <Text style={styles.title}>{restaurant.name}</Text>
-
-            {location ? (
-              <Text style={styles.location}>{location}</Text>
-            ) : null}
+            <Text style={styles.title}>
+              {restaurant.brands?.name ?? restaurant.name}
+            </Text>
           </View>
 
           <View style={styles.headerRating}>
             <Text style={styles.ratingNumber}>
-              {averageRating > 0 ? averageRating.toFixed(1) : '—'} ★
+              {restaurantRating > 0 ? restaurantRating.toFixed(1) : '—'} ★
             </Text>
 
             <Text style={styles.ratingLabel}>
-              {totalReviewCount}{' '}
-              {totalReviewCount === 1 ? 'review' : 'reviews'}
+              {ratingCount > 0 ? 'Restaurant rating' : 'No ratings yet'}
             </Text>
           </View>
         </View>
 
         <AddToListButton listType="restaurant" targetId={restaurant.id} />
+
+        {topItems.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Top Items</Text>
+
+            {topItems.map(renderDishRow)}
+          </View>
+        ) : null}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Menu</Text>
@@ -251,35 +331,7 @@ export default function RestaurantDetailScreen() {
               No dishes logged yet.
             </Text>
           ) : (
-            dishes.map((dish) => (
-              <TouchableOpacity
-                key={dish.id}
-                style={styles.dishRow}
-                onPress={() =>
-                  router.push({
-                    pathname: '/dish/[id]',
-                    params: { id: dish.id },
-                  })
-                }
-              >
-                <View style={styles.dishInfo}>
-                  <Text style={styles.dishName}>
-                    {dish.name}
-                  </Text>
-
-                  <Text style={styles.dishSubtext}>
-                    {dish.reviewCount}{' '}
-                    {dish.reviewCount === 1 ? 'review' : 'reviews'}
-                  </Text>
-                </View>
-
-                <Text style={styles.dishRating}>
-                  {dish.averageRating > 0
-                    ? `${dish.averageRating.toFixed(1)} ★`
-                    : '—'}
-                </Text>
-              </TouchableOpacity>
-            ))
+            dishes.map(renderDishRow)
           )}
         </View>
 
@@ -380,11 +432,6 @@ const styles = StyleSheet.create({
     color: Palette.text,
     fontSize: 30,
     fontWeight: '700',
-  },
-  location: {
-    fontSize: 16,
-    color: Palette.textSecondary,
-    marginTop: 6,
   },
   ratingNumber: {
     color: Palette.accent,
