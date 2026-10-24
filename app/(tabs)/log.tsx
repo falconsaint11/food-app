@@ -1,5 +1,5 @@
 import * as ImagePicker from "expo-image-picker";
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 
 import * as Location from "expo-location";
 
@@ -1217,6 +1217,8 @@ export default function LogScreen() {
       setFriendSearch("");
 
       resetGoogleSession();
+
+      router.navigate("/(tabs)");
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Something went wrong.";
