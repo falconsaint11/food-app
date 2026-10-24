@@ -4,7 +4,6 @@ import {
   Alert,
   Modal,
   Pressable,
-  ScrollView,
   StyleProp,
   StyleSheet,
   Text,
@@ -15,11 +14,6 @@ import {
 
 import { StarRatingInput } from '@/components/star-rating-input';
 import { Palette } from '@/constants/theme';
-import {
-  BrandLocation,
-  describeLocation,
-  getBrandLocationsNearestFirst,
-} from '@/lib/brands';
 import { supabase } from '@/lib/supabase';
 
 type RateRestaurantButtonProps = {
@@ -30,8 +24,9 @@ type RateRestaurantButtonProps = {
   style?: StyleProp<ViewStyle>;
 };
 
-// Restaurant ratings are stored per location, so the sheet defaults to the
-// nearest saved location and lets the user switch for a past visit.
+// Rates the restaurant as a whole: one brand-wide rating per user, with no
+// location to pick. (Logging in the Log tab rates the specific location.)
+// Restaurants without a brand fall back to rating that one location.
 export function RateRestaurantButton({
   restaurantId,
   brandId,
@@ -42,13 +37,6 @@ export function RateRestaurantButton({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [locations, setLocations] = useState<BrandLocation[]>([]);
-  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(
-    null
-  );
-  const [existingRatings, setExistingRatings] = useState<Map<string, number>>(
-    new Map()
-  );
   const [rating, setRating] = useState(0);
 
   async function openSheet() {
@@ -62,53 +50,31 @@ export function RateRestaurantButton({
 
       if (!user) throw new Error('You must be signed in to rate.');
 
-      const brandLocations = await getBrandLocationsNearestFirst(
-        restaurantId,
-        brandId
-      );
-
-      const { data, error } = await supabase
+      const query = supabase
         .from('restaurant_ratings')
-        .select('restaurant_id, rating')
-        .eq('user_id', user.id)
-        .in(
-          'restaurant_id',
-          brandLocations.map((location) => location.id)
-        );
+        .select('rating')
+        .eq('user_id', user.id);
+
+      const { data, error } = brandId
+        ? await query.eq('brand_id', brandId).maybeSingle()
+        : await query.eq('restaurant_id', restaurantId).maybeSingle();
 
       if (error) throw new Error(error.message);
 
-      const ratings = new Map(
-        (data ?? []).map((row) => [
-          row.restaurant_id as string,
-          Number(row.rating),
-        ])
-      );
-
-      const firstId = brandLocations[0]?.id ?? null;
-
-      setLocations(brandLocations);
-      setExistingRatings(ratings);
-      setSelectedLocationId(firstId);
-      setRating(firstId ? ratings.get(firstId) ?? 0 : 0);
+      setRating(data ? Number(data.rating) : 0);
     } catch (error) {
       setOpen(false);
       Alert.alert(
         'Rating error',
-        error instanceof Error ? error.message : 'Could not load ratings.'
+        error instanceof Error ? error.message : 'Could not load your rating.'
       );
     } finally {
       setLoading(false);
     }
   }
 
-  function selectLocation(locationId: string) {
-    setSelectedLocationId(locationId);
-    setRating(existingRatings.get(locationId) ?? 0);
-  }
-
   async function saveRating() {
-    if (!selectedLocationId || rating < 0.5) {
+    if (rating < 0.5) {
       return;
     }
 
@@ -121,14 +87,19 @@ export function RateRestaurantButton({
 
       if (!user) throw new Error('You must be signed in to rate.');
 
-      const { error } = await supabase.from('restaurant_ratings').upsert(
-        {
-          user_id: user.id,
-          restaurant_id: selectedLocationId,
-          rating,
-        },
-        { onConflict: 'user_id,restaurant_id' }
-      );
+      const { error } = brandId
+        ? await supabase
+            .from('restaurant_ratings')
+            .upsert(
+              { user_id: user.id, brand_id: brandId, rating },
+              { onConflict: 'user_id,brand_id' }
+            )
+        : await supabase
+            .from('restaurant_ratings')
+            .upsert(
+              { user_id: user.id, restaurant_id: restaurantId, rating },
+              { onConflict: 'user_id,restaurant_id' }
+            );
 
       if (error) throw new Error(error.message);
 
@@ -167,43 +138,6 @@ export function RateRestaurantButton({
             <ActivityIndicator style={styles.loading} />
           ) : (
             <>
-              {locations.length > 1 ? (
-                <>
-                  <Text style={styles.label}>Which location?</Text>
-
-                  <ScrollView style={styles.locationList}>
-                    {locations.map((location) => {
-                      const selected = location.id === selectedLocationId;
-                      const existing = existingRatings.get(location.id);
-
-                      return (
-                        <TouchableOpacity
-                          key={location.id}
-                          style={[
-                            styles.locationOption,
-                            selected && styles.locationOptionSelected,
-                          ]}
-                          onPress={() => selectLocation(location.id)}
-                        >
-                          <Text
-                            style={styles.locationText}
-                            numberOfLines={1}
-                          >
-                            {describeLocation(location)}
-                          </Text>
-
-                          {existing ? (
-                            <Text style={styles.locationRating}>
-                              {existing.toFixed(1)} ★
-                            </Text>
-                          ) : null}
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-                </>
-              ) : null}
-
               <StarRatingInput value={rating} onChange={setRating} />
 
               <TouchableOpacity
@@ -261,42 +195,6 @@ const styles = StyleSheet.create({
   },
   loading: {
     marginVertical: 24,
-  },
-  label: {
-    color: Palette.textSecondary,
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  locationList: {
-    flexGrow: 0,
-    maxHeight: 180,
-    marginBottom: 18,
-  },
-  locationOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    borderWidth: 1,
-    borderColor: Palette.borderStrong,
-    borderRadius: 10,
-    marginBottom: 8,
-  },
-  locationOptionSelected: {
-    borderColor: Palette.accent,
-  },
-  locationText: {
-    flex: 1,
-    color: Palette.text,
-    fontSize: 14,
-    paddingRight: 10,
-  },
-  locationRating: {
-    color: Palette.accent,
-    fontSize: 13,
-    fontWeight: '700',
   },
   saveButton: {
     backgroundColor: Palette.accent,

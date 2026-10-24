@@ -22,6 +22,7 @@ import {
 import { StarRatingInput } from "@/components/star-rating-input";
 import { getBrandLocationIds } from "@/lib/brands";
 import { supabase } from "@/lib/supabase";
+import { fetchTags, guessDishTags, Tag } from "@/lib/tags";
 import { Palette } from "@/constants/theme";
 
 type RestaurantResult = {
@@ -172,6 +173,13 @@ export default function LogScreen() {
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
   const [friendSearch, setFriendSearch] = useState("");
   const [friendsLoading, setFriendsLoading] = useState(true);
+
+  const [allTags, setAllTags] = useState<Tag[]>([]);
+
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+
+  // Once the user taps a tag, stop replacing their choice with name guesses.
+  const [tagsTouched, setTagsTouched] = useState(false);
 
   const [photoUri, setPhotoUri] = useState<string | null>(null);
 
@@ -340,6 +348,47 @@ export default function LogScreen() {
       cancelled = true;
     };
   }, [prefill.restaurantId, prefill.dishName]);
+
+  useEffect(() => {
+    fetchTags()
+      .then(setAllTags)
+      .catch((error) => console.log("Could not load tags:", error));
+  }, []);
+
+  // Pre-select tags from the dish name ("Cheeseburger" -> Burger).
+  useEffect(() => {
+    const trimmed = dishName.trim();
+
+    if (trimmed.length < 2 || tagsTouched) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const timeout = setTimeout(async () => {
+      const guesses = await guessDishTags(trimmed);
+
+      if (!cancelled) setSelectedTags(guesses);
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [dishName, tagsTouched]);
+
+  // Leftover picks don't count once the dish name is cleared.
+  const activeTags = dishName.trim().length >= 2 ? selectedTags : [];
+
+  function toggleTag(slug: string) {
+    setTagsTouched(true);
+
+    setSelectedTags((current) =>
+      current.includes(slug)
+        ? current.filter((tag) => tag !== slug)
+        : [...current, slug],
+    );
+  }
 
   // Show the user's existing rating for this location; logging again updates it.
   useEffect(() => {
@@ -511,6 +560,8 @@ export default function LogScreen() {
     setWebsite(null);
 
     setRestaurantRating(0);
+
+    setTagsTouched(false);
 
     setAddress("");
 
@@ -839,6 +890,9 @@ export default function LogScreen() {
     if (trimmed.length < 2) {
       setDishResults([]);
 
+      // Clearing the dish starts tagging over.
+      setTagsTouched(false);
+
       return;
     }
 
@@ -1131,13 +1185,28 @@ export default function LogScreen() {
       return;
     }
 
-    if (!dishName.trim()) {
-      Alert.alert("Missing dish", "Enter a dish name.");
+    // No dish means the user is only rating the restaurant.
+    const hasDish = dishName.trim().length > 0;
 
-      return;
-    }
+    if (!hasDish) {
+      if (restaurantRating < 0.5) {
+        Alert.alert(
+          "Nothing to log",
+          "Add a dish, or rate the restaurant to log just the restaurant.",
+        );
 
-    if (rating < 0.5 || rating > 5) {
+        return;
+      }
+
+      if (reviewText.trim() || photoUri || selectedFriends.length > 0) {
+        Alert.alert(
+          "Add a dish",
+          "Notes, photos and friends are saved with a dish. Add a dish, or clear them to just rate the restaurant.",
+        );
+
+        return;
+      }
+    } else if (rating < 0.5 || rating > 5) {
       Alert.alert("Missing rating", "Choose a rating before logging the dish.");
 
       return;
@@ -1154,7 +1223,7 @@ export default function LogScreen() {
 
     // Before creating a new dish, use an exact match ("Large Fries" -> "Fries")
     // or ask about a close one ("Fry" -> "French Fries").
-    if (!matchedDish && menuLocationIds.length > 0) {
+    if (hasDish && !matchedDish && menuLocationIds.length > 0) {
       try {
         const [best] = await searchDishMatches(
           menuLocationIds,
@@ -1196,133 +1265,25 @@ export default function LogScreen() {
       return;
     }
 
-    let uploadedPhotoPath: string | null = null;
-
     try {
       const restaurantId = await findOrCreateRestaurant();
 
-      const dishId = await findOrCreateDish(restaurantId, matchedDish);
+      if (!hasDish) {
+        const ratingError = await saveRestaurantRating(user.id, restaurantId);
 
-      if (photoUri) {
-        uploadedPhotoPath = await uploadPhoto(photoUri, user.id);
-      }
-
-      const { data: createdReview, error: reviewError } = await supabase
-        .from("reviews")
-        .insert({
-          user_id: user.id,
-          dish_id: dishId,
-          rating,
-          review_text: reviewText.trim() || null,
-          photo_path: uploadedPhotoPath,
-        })
-        .select("id")
-        .single();
-
-      if (reviewError) {
-        if (uploadedPhotoPath) {
-          await supabase.storage
-
-            .from("review-photos")
-
-            .remove([uploadedPhotoPath]);
+        if (ratingError) {
+          throw new Error(ratingError);
         }
 
-        throw new Error(reviewError.message);
-      }
-
-      if (!createdReview) {
-        throw new Error("Review was saved but its ID was not returned.");
-      }
-
-      // Review creation and tag creation are separate requests. If tagging fails,
-      // keep the successfully created review and tell the user what happened.
-      let tagsSaved = true;
-      if (selectedFriends.length > 0) {
-        const { error: tagsError } = await supabase.from("review_tags").insert(
-          selectedFriends.map((friendId) => ({
-            review_id: createdReview.id,
-            tagged_user_id: friendId,
-          })),
+        Alert.alert(
+          "Rated!",
+          `Your rating for ${restaurantName.trim()} was saved.`,
         );
-        if (tagsError) {
-          console.log("Review tags error:", tagsError.message);
-          tagsSaved = false;
-        }
+      } else {
+        await saveDishLog(user.id, restaurantId, matchedDish);
       }
 
-      let restaurantRatingSaved = true;
-      if (restaurantRating > 0) {
-        const { error: restaurantRatingError } = await supabase
-          .from("restaurant_ratings")
-          .upsert(
-            {
-              user_id: user.id,
-              restaurant_id: restaurantId,
-              rating: restaurantRating,
-            },
-            { onConflict: "user_id,restaurant_id" },
-          );
-        if (restaurantRatingError) {
-          console.log(
-            "Restaurant rating error:",
-            restaurantRatingError.message,
-          );
-          restaurantRatingSaved = false;
-        }
-      }
-
-      const failedExtras = [
-        !tagsSaved && "the friend tags",
-        !restaurantRatingSaved && "the restaurant rating",
-      ].filter(Boolean);
-
-      Alert.alert(
-        failedExtras.length === 0 ? "Logged!" : "Logged, with a problem",
-        failedExtras.length === 0
-          ? `${dishName.trim()} was added to your diary.`
-          : `${dishName.trim()} was added to your diary, but ${failedExtras.join(" and ")} could not be saved.`,
-      );
-
-      setRestaurantName("");
-
-      setRestaurantResults([]);
-
-      setGoogleResults([]);
-
-      setSelectedRestaurantId(null);
-
-      setGooglePlaceId(null);
-
-      setWebsite(null);
-
-      setAddress("");
-
-      setCity("");
-
-      setState("");
-
-      setLatitude(null);
-
-      setLongitude(null);
-
-      setDishName("");
-
-      setDishResults([]);
-
-      setSelectedDishId(null);
-
-      setRating(0);
-
-      setRestaurantRating(0);
-
-      setReviewText("");
-
-      setPhotoUri(null);
-      setSelectedFriends([]);
-      setFriendSearch("");
-
-      resetGoogleSession();
+      resetForm();
 
       router.navigate("/(tabs)");
     } catch (error) {
@@ -1333,6 +1294,164 @@ export default function LogScreen() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function saveRestaurantRating(userId: string, restaurantId: string) {
+    const { error } = await supabase.from("restaurant_ratings").upsert(
+      {
+        user_id: userId,
+        restaurant_id: restaurantId,
+        rating: restaurantRating,
+      },
+      { onConflict: "user_id,restaurant_id" },
+    );
+
+    if (error) {
+      console.log("Restaurant rating error:", error.message);
+    }
+
+    return error?.message ?? null;
+  }
+
+  async function saveDishLog(
+    userId: string,
+    restaurantId: string,
+    matchedDish: DishResult | null,
+  ) {
+    let uploadedPhotoPath: string | null = null;
+
+    const dishId = await findOrCreateDish(restaurantId, matchedDish);
+
+    if (photoUri) {
+      uploadedPhotoPath = await uploadPhoto(photoUri, userId);
+    }
+
+    const { data: createdReview, error: reviewError } = await supabase
+      .from("reviews")
+      .insert({
+        user_id: userId,
+        dish_id: dishId,
+        rating,
+        review_text: reviewText.trim() || null,
+        photo_path: uploadedPhotoPath,
+      })
+      .select("id")
+      .single();
+
+    if (reviewError) {
+      if (uploadedPhotoPath) {
+        await supabase.storage
+
+          .from("review-photos")
+
+          .remove([uploadedPhotoPath]);
+      }
+
+      throw new Error(reviewError.message);
+    }
+
+    if (!createdReview) {
+      throw new Error("Review was saved but its ID was not returned.");
+    }
+
+    // Review creation and tag creation are separate requests. If tagging fails,
+    // keep the successfully created review and tell the user what happened.
+    let tagsSaved = true;
+    if (selectedFriends.length > 0) {
+      const { error: tagsError } = await supabase.from("review_tags").insert(
+        selectedFriends.map((friendId) => ({
+          review_id: createdReview.id,
+          tagged_user_id: friendId,
+        })),
+      );
+      if (tagsError) {
+        console.log("Review tags error:", tagsError.message);
+        tagsSaved = false;
+      }
+    }
+
+    let restaurantRatingSaved = true;
+    if (restaurantRating > 0) {
+      restaurantRatingSaved =
+        (await saveRestaurantRating(userId, restaurantId)) === null;
+    }
+
+    // A tag shows publicly once enough people vote for it, so each user's
+    // tags are votes; re-tagging the same dish is ignored.
+    let dishTagsSaved = true;
+    if (activeTags.length > 0) {
+      const { error: dishTagsError } = await supabase
+        .from("dish_tag_votes")
+        .upsert(
+          activeTags.map((tag) => ({
+            user_id: userId,
+            dish_id: dishId,
+            tag,
+          })),
+          { onConflict: "user_id,dish_id,tag", ignoreDuplicates: true },
+        );
+      if (dishTagsError) {
+        console.log("Dish tags error:", dishTagsError.message);
+        dishTagsSaved = false;
+      }
+    }
+
+    const failedExtras = [
+      !tagsSaved && "the friend tags",
+      !restaurantRatingSaved && "the restaurant rating",
+      !dishTagsSaved && "the dish tags",
+    ].filter(Boolean);
+
+    Alert.alert(
+      failedExtras.length === 0 ? "Logged!" : "Logged, with a problem",
+      failedExtras.length === 0
+        ? `${dishName.trim()} was added to your diary.`
+        : `${dishName.trim()} was added to your diary, but ${failedExtras.join(" and ")} could not be saved.`,
+    );
+  }
+
+  function resetForm() {
+    setRestaurantName("");
+
+    setRestaurantResults([]);
+
+    setGoogleResults([]);
+
+    setSelectedRestaurantId(null);
+
+    setGooglePlaceId(null);
+
+    setWebsite(null);
+
+    setAddress("");
+
+    setCity("");
+
+    setState("");
+
+    setLatitude(null);
+
+    setLongitude(null);
+
+    setDishName("");
+
+    setDishResults([]);
+
+    setSelectedDishId(null);
+
+    setRating(0);
+
+    setRestaurantRating(0);
+
+    setReviewText("");
+
+    setPhotoUri(null);
+    setSelectedFriends([]);
+    setFriendSearch("");
+    setSelectedTags([]);
+    setTagsTouched(false);
+
+    resetGoogleSession();
   }
 
   const creatingNewRestaurant =
@@ -1660,7 +1779,36 @@ export default function LogScreen() {
           </View>
         ) : null}
 
-        <Text style={styles.label}>Rating</Text>
+        {dishName.trim().length >= 2 && allTags.length > 0 ? (
+          <>
+            <Text style={styles.label}>Tags (Optional)</Text>
+
+            <View style={styles.tagChips}>
+              {allTags.map((tag) => {
+                const selected = activeTags.includes(tag.slug);
+
+                return (
+                  <TouchableOpacity
+                    key={tag.slug}
+                    style={[styles.tagChip, selected && styles.tagChipSelected]}
+                    onPress={() => toggleTag(tag.slug)}
+                  >
+                    <Text
+                      style={[
+                        styles.tagChipText,
+                        selected && styles.tagChipTextSelected,
+                      ]}
+                    >
+                      {tag.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </>
+        ) : null}
+
+        <Text style={styles.label}>Dish Rating</Text>
 
         <StarRatingInput value={rating} onChange={setRating} />
 
@@ -1797,7 +1945,9 @@ export default function LogScreen() {
               ? photoUri
                 ? "Uploading & Logging..."
                 : "Logging..."
-              : "Log Dish"}
+              : dishName.trim()
+                ? "Log Dish"
+                : "Save Restaurant Rating"}
           </Text>
         </TouchableOpacity>
       </ScrollView>
@@ -2127,6 +2277,46 @@ const styles = StyleSheet.create({
     color: Palette.danger,
 
     fontWeight: "600",
+  },
+
+  tagChips: {
+    flexDirection: "row",
+
+    flexWrap: "wrap",
+
+    gap: 8,
+
+    marginBottom: 22,
+  },
+
+  tagChip: {
+    paddingHorizontal: 12,
+
+    paddingVertical: 7,
+
+    borderRadius: 16,
+
+    borderWidth: 1,
+
+    borderColor: Palette.borderStrong,
+  },
+
+  tagChipSelected: {
+    backgroundColor: Palette.accent,
+
+    borderColor: Palette.accent,
+  },
+
+  tagChipText: {
+    fontSize: 13,
+
+    fontWeight: "600",
+
+    color: Palette.textSecondary,
+  },
+
+  tagChipTextSelected: {
+    color: Palette.text,
   },
 
   optionalLabelRow: {

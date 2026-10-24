@@ -37,14 +37,6 @@ export type BrandLocation = {
   longitude: number | null;
 };
 
-export function describeLocation(location: BrandLocation) {
-  return (
-    location.address ||
-    [location.city, location.state].filter(Boolean).join(', ') ||
-    location.name
-  );
-}
-
 // The brand's saved locations, nearest to the user first so ratings and logs
 // default to where they probably are. Without location permission (we never
 // prompt here), the location the page was opened from comes first.

@@ -1,6 +1,6 @@
 # Restaurants, dishes and ratings
 
-How restaurant data is organized, how ratings and photos work, and the SQL
+How restaurant data is organized, how ratings, tags and photos work, and the SQL
 commands for cleaning things up. The database changes live in
 `supabase/migrations/` (see [Migrations](#migrations)).
 
@@ -45,19 +45,26 @@ There are two separate kinds of rating:
 | | Dish rating | Restaurant rating |
 |---|---|---|
 | Table | `reviews` (via `dishes`) | `restaurant_ratings` |
-| Required when logging? | Yes | No, an optional star row in the Log tab |
-| How many per user | One per log | One per user per **location**; rating again replaces it |
+| Required when logging? | Only if a dish is entered | Only if no dish is entered |
+| How many per user | One per log | One per **location** (Log tab) and one per **brand** (Rate button); rating again replaces it |
 | Shown on | Dish rows, Top Items, the dish page | The restaurant page header |
 
+Each `restaurant_ratings` row is for exactly one of `restaurant_id` (a
+location) or `brand_id` (the whole restaurant). `brand_id` has no foreign key
+on purpose; see the comment in `20261027000000_brand_ratings.sql`.
+
 The restaurant page header averages **each person's** ratings across the brand
-first, then averages those people. Someone who rated five McDonald's counts as
+(location and brand-wide ratings) first, then averages those people. Someone who rated five McDonald's counts as
 one vote. Dish reviews never count toward the restaurant rating; a restaurant
 nobody has rated shows "No ratings yet".
 
 Ways to rate:
-- **Log tab:** dish stars (required) and "How was the restaurant?" (optional).
-- **Restaurant page, ★ Rate:** a pop-up defaulting to the user's nearest saved
-  location of the brand, with the option to pick another.
+- **Log tab with a dish:** dish stars (required) and "How was the restaurant?"
+  (optional), saved for that location.
+- **Log tab with no dish:** just the restaurant stars, saved for that location
+  ("Save Restaurant Rating"). Notes, photos and friends need a dish.
+- **Restaurant page, ★ Rate:** a pop-up with only the stars. It saves one
+  brand-wide rating, so there's no location to pick.
 - **Restaurant page, + Log a dish** and **dish page, ★ Rate this dish:** open
   the Log tab pre-filled through the `restaurantId` and `dishName` params,
   using the nearest location.
@@ -82,6 +89,28 @@ from is used.
   `SIMILAR_DISH_PROMPT_SCORE` in `app/(tabs)/log.tsx`).
 - Picking a dish that only exists at another location creates a row for it at
   the current location, using the existing name.
+
+## Dish tags
+
+Tags like Burger, Dessert or Alcoholic Drink let people browse "top burgers"
+on Discover.
+
+- **A fixed list** lives in the `tags` table, so there are no
+  "burger / burgers / hamburger" duplicates. A dish can have several tags (a
+  milkshake is Dessert + Drink).
+- **People vote when logging.** The Log tab shows optional tag chips,
+  pre-selected from the dish name using each tag's `keywords`
+  (`guess_dish_tags()`). Guesses are only suggestions; the person logging
+  still has to confirm. Each pick is stored as a vote in `dish_tag_votes`.
+- **A tag shows publicly only once 2 different people agree**
+  (`dish_tag_vote_threshold()`). Votes on the same dish at different locations
+  of a brand count together; the same person voting twice counts once.
+- **Discover → Top Rated Dishes** has tag chips. Picking one lists the best
+  dishes with that public tag (`top_dishes_by_tag()`), one entry per dish
+  across a brand's locations. The ranking is a Bayesian average: each dish
+  starts with 5 imaginary reviews at the app-wide average, so one lucky 5★
+  review can't beat a dish many people rated 4.6★.
+- **Dish page:** shows the dish's public tags under its name.
 
 ## Cover photos
 
@@ -110,17 +139,26 @@ select merge_dishes('<id of "Fry">', '<id of "French Fries">');
 update brands set cover_review_id = '<review id>' where id = '<brand id>';
 update dishes set cover_review_id = '<review id>' where id = '<dish id>';
 
+-- Add a dish tag (keywords pre-select it in the Log tab)
+insert into tags (slug, label, sort_order, keywords)
+values ('vegan', 'Vegan', 220, 'vegan|plant based');
+
+-- Require 3 people to agree instead of 2
+create or replace function dish_tag_vote_threshold() returns int
+language sql immutable as $$ select 3; $$;
+
 -- Move a location to a different brand
 update restaurants set brand_id = '<brand id>' where id = '<restaurant id>';
 ```
 
-`merge_dishes()` removes a user's ranking of the duplicate if they also ranked
-the surviving dish, which can leave a gap in their ranking numbers.
+`merge_dishes()` also moves tag votes. It removes a user's ranking of the
+duplicate if they also ranked the surviving dish, which can leave a gap in
+their ranking numbers.
 
 ## Migrations
 
-Run in order in the Supabase SQL editor. All of these have already been run on
-the shared project.
+Run in order in the Supabase SQL editor. All except `20261027000000_brand_ratings.sql`
+have already been run on the shared project.
 
 | File | What it does |
 |---|---|
@@ -130,6 +168,8 @@ the shared project.
 | `20261024000000_dish_matching.sql` | `dishes.name_key`, `pg_trgm`, `search_dishes()`, `merge_dishes()` |
 | `20261025000000_cover_photos.sql` | `cover_review_id` pins and `cover_photos()` |
 | `20261025000001_drop_dish_cover_fk.sql` | Removes a foreign key that made `reviews → dishes` queries ambiguous (it broke the feed) |
+| `20261026000000_dish_tags.sql` | `tags` list, `dish_tag_votes`, tag guesses, public tags (2-vote rule), `top_dishes_by_tag()`, and `merge_dishes()` moving tag votes |
+| `20261027000000_brand_ratings.sql` | Brand-wide restaurant ratings: `restaurant_ratings.brand_id`, exactly one of location or brand per row |
 
 Don't add a foreign key from `dishes` to `reviews`. `reviews.dish_id` already
 links them, and a second link breaks every `reviews … dishes (…)` query.

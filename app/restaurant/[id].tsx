@@ -107,10 +107,17 @@ export default function RestaurantDetailScreen() {
         restaurantRow.brand_id
       );
 
-      const { data: ratingData, error: ratingError } = await supabase
+      // Ratings of any of the brand's locations (from the Log tab) plus
+      // brand-wide ratings (from the Rate button).
+      const ratingQuery = supabase
         .from('restaurant_ratings')
-        .select('user_id, rating')
-        .in('restaurant_id', locationIds);
+        .select('user_id, rating');
+
+      const { data: ratingData, error: ratingError } = restaurantRow.brand_id
+        ? await ratingQuery.or(
+            `restaurant_id.in.(${locationIds.join(',')}),brand_id.eq.${restaurantRow.brand_id}`
+          )
+        : await ratingQuery.in('restaurant_id', locationIds);
 
       if (ratingError) throw new Error(ratingError.message);
 
