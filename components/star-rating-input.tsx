@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View, type ViewInstance } from "react-native";
 
 import { Palette } from "@/constants/theme";
 
@@ -39,7 +39,7 @@ export function StarRatingInput({ value, onChange }: StarRatingInputProps) {
 
   const [ratingLeftX, setRatingLeftX] = useState(0);
 
-  const ratingRowRef = useRef<View>(null);
+  const ratingRowRef = useRef<ViewInstance>(null);
 
   function updateRatingFromPageX(pageX: number) {
     if (ratingWidth <= 0) {
