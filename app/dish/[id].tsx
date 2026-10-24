@@ -11,7 +11,15 @@ import {
 } from 'react-native';
 
 import { AddToListButton } from '@/components/add-to-list-button';
-import { getBrandLocationIds } from '@/lib/brands';
+import {
+  CoverPhoto,
+  CoverPhotos,
+  fetchCoverPhotos,
+} from '@/components/cover-photos';
+import {
+  getBrandLocationIds,
+  getBrandLocationsNearestFirst,
+} from '@/lib/brands';
 import { supabase } from '@/lib/supabase';
 import { Palette } from '@/constants/theme';
 
@@ -19,6 +27,7 @@ type Dish = {
   id: string;
   name: string;
   name_key: string;
+  cover_review_id: string | null;
   category: string | null;
   price: number | null;
   restaurants: {
@@ -49,6 +58,7 @@ export default function DishDetailScreen() {
 
   const [dish, setDish] = useState<Dish | null>(null);
   const [reviews, setReviews] = useState<DishReview[]>([]);
+  const [coverPhotos, setCoverPhotos] = useState<CoverPhoto[]>([]);
   const [averageRating, setAverageRating] = useState(0);
   const [rankingCount, setRankingCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -72,6 +82,7 @@ export default function DishDetailScreen() {
         id,
         name,
         name_key,
+        cover_review_id,
         category,
         price,
         restaurants (
@@ -101,6 +112,8 @@ export default function DishDetailScreen() {
 
     // The same dish at other locations of this brand counts as one dish.
     let sameDishIds = [dishRow.id];
+    // A cover pinned on this dish at any location of the brand.
+    let pinnedReviewId = dishRow.cover_review_id;
 
     if (dishRow.restaurants) {
       try {
@@ -111,14 +124,21 @@ export default function DishDetailScreen() {
 
         const { data: siblingData, error: siblingError } = await supabase
           .from('dishes')
-          .select('id, name_key')
+          .select('id, name_key, cover_review_id')
           .in('restaurant_id', locationIds);
 
         if (siblingError) throw new Error(siblingError.message);
 
-        sameDishIds = (siblingData ?? [])
-          .filter((sibling) => sibling.name_key === dishRow.name_key)
-          .map((sibling) => sibling.id as string);
+        const sameDishes = (siblingData ?? []).filter(
+          (sibling) => sibling.name_key === dishRow.name_key
+        );
+
+        sameDishIds = sameDishes.map((sibling) => sibling.id as string);
+        pinnedReviewId =
+          pinnedReviewId ??
+          sameDishes.find((sibling) => sibling.cover_review_id)
+            ?.cover_review_id ??
+          null;
       } catch (error) {
         setLoading(false);
         Alert.alert(
@@ -128,6 +148,8 @@ export default function DishDetailScreen() {
         return;
       }
     }
+
+    setCoverPhotos(await fetchCoverPhotos(sameDishIds, pinnedReviewId));
 
     const { data: reviewData, error: reviewError } = await supabase
       .from('reviews')
@@ -183,6 +205,34 @@ export default function DishDetailScreen() {
     setRankingCount(count ?? 0);
   }
 
+  // Open the Log tab with this dish at the user's nearest location of the
+  // restaurant, so they only have to add stars.
+  async function rateDish() {
+    if (!dish?.restaurants) {
+      return;
+    }
+
+    try {
+      const [nearest] = await getBrandLocationsNearestFirst(
+        dish.restaurants.id,
+        dish.restaurants.brand_id
+      );
+
+      router.navigate({
+        pathname: '/(tabs)/log',
+        params: {
+          restaurantId: nearest?.id ?? dish.restaurants.id,
+          dishName: dish.name,
+        },
+      });
+    } catch (error) {
+      Alert.alert(
+        'Dish error',
+        error instanceof Error ? error.message : 'Could not open the log.'
+      );
+    }
+  }
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -202,145 +252,170 @@ export default function DishDetailScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>
-        {dish.name}
-      </Text>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.scrollContent}
+    >
+      <CoverPhotos photos={coverPhotos} title={dish.name} />
 
-      {dish.restaurants ? (
-        <TouchableOpacity
-          onPress={() =>
-            router.push({
-              pathname: '/restaurant/[id]',
-              params: { id: dish.restaurants!.id },
-            })
-          }
-        >
-          <Text style={styles.restaurantLink}>
-            {dish.restaurants.brands?.name ?? dish.restaurants.name}
-          </Text>
-        </TouchableOpacity>
-      ) : null}
-
-      <AddToListButton listType="dish" targetId={dish.id} />
-
-      <View style={styles.statsCard}>
-        <View style={styles.stat}>
-          <Text style={styles.statNumber}>
-            {averageRating > 0
-              ? averageRating.toFixed(1)
-              : '—'}{' '}
-            ★
-          </Text>
-
-          <Text style={styles.statLabel}>
-            Average rating
-          </Text>
-        </View>
-
-        <View style={styles.statDivider} />
-
-        <View style={styles.stat}>
-          <Text style={styles.statNumber}>
-            {reviews.length}
-          </Text>
-
-          <Text style={styles.statLabel}>
-            {reviews.length === 1 ? 'Review' : 'Reviews'}
-          </Text>
-        </View>
-
-        <View style={styles.statDivider} />
-
-        <View style={styles.stat}>
-          <Text style={styles.statNumber}>
-            {rankingCount}
-          </Text>
-
-          <Text style={styles.statLabel}>
-            Top lists
-          </Text>
-        </View>
-      </View>
-
-      {dish.category || dish.price !== null ? (
-        <View style={styles.details}>
-          {dish.category ? (
-            <Text style={styles.detailText}>
-              Category: {dish.category}
-            </Text>
-          ) : null}
-
-          {dish.price !== null ? (
-            <Text style={styles.detailText}>
-              Price: ${Number(dish.price).toFixed(2)}
-            </Text>
-          ) : null}
-        </View>
-      ) : null}
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>
-          Reviews
+      <View style={styles.container}>
+        <Text style={styles.title}>
+          {dish.name}
         </Text>
 
-        {reviews.length === 0 ? (
-          <Text style={styles.emptyText}>
-            No reviews yet.
-          </Text>
-        ) : (
-          reviews.map((review) => (
-            <TouchableOpacity
-              key={review.id}
-              style={styles.reviewCard}
-              onPress={() =>
-                router.push({
-                  pathname: '/review/[id]',
-                  params: { id: review.id },
-                })
-              }
-            >
-              <View style={styles.reviewTopRow}>
-                <View style={styles.reviewerInfo}>
-                  <Text style={styles.reviewer}>
-                    {review.profiles?.display_name ||
-                      review.profiles?.username ||
-                      'User'}
-                  </Text>
+        {dish.restaurants ? (
+          <TouchableOpacity
+            onPress={() =>
+              router.push({
+                pathname: '/restaurant/[id]',
+                params: { id: dish.restaurants!.id },
+              })
+            }
+          >
+            <Text style={styles.restaurantLink}>
+              {dish.restaurants.brands?.name ?? dish.restaurants.name}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
 
-                  <Text style={styles.handle}>
-                    @{review.profiles?.username ?? 'unknown'}
+        <View style={styles.actions}>
+          {dish.restaurants ? (
+            <TouchableOpacity style={styles.actionButton} onPress={rateDish}>
+              <Text style={styles.actionButtonText} numberOfLines={1}>
+                ★ Rate this dish
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+
+          <AddToListButton
+            listType="dish"
+            targetId={dish.id}
+            style={styles.actionButton}
+          />
+        </View>
+
+        <View style={styles.statsCard}>
+          <View style={styles.stat}>
+            <Text style={styles.statNumber}>
+              {averageRating > 0
+                ? averageRating.toFixed(1)
+                : '—'}{' '}
+              ★
+            </Text>
+
+            <Text style={styles.statLabel}>
+              Average rating
+            </Text>
+          </View>
+
+          <View style={styles.statDivider} />
+
+          <View style={styles.stat}>
+            <Text style={styles.statNumber}>
+              {reviews.length}
+            </Text>
+
+            <Text style={styles.statLabel}>
+              {reviews.length === 1 ? 'Review' : 'Reviews'}
+            </Text>
+          </View>
+
+          <View style={styles.statDivider} />
+
+          <View style={styles.stat}>
+            <Text style={styles.statNumber}>
+              {rankingCount}
+            </Text>
+
+            <Text style={styles.statLabel}>
+              Top lists
+            </Text>
+          </View>
+        </View>
+
+        {dish.category || dish.price !== null ? (
+          <View style={styles.details}>
+            {dish.category ? (
+              <Text style={styles.detailText}>
+                Category: {dish.category}
+              </Text>
+            ) : null}
+
+            {dish.price !== null ? (
+              <Text style={styles.detailText}>
+                Price: ${Number(dish.price).toFixed(2)}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            Reviews
+          </Text>
+
+          {reviews.length === 0 ? (
+            <Text style={styles.emptyText}>
+              No reviews yet.
+            </Text>
+          ) : (
+            reviews.map((review) => (
+              <TouchableOpacity
+                key={review.id}
+                style={styles.reviewCard}
+                onPress={() =>
+                  router.push({
+                    pathname: '/review/[id]',
+                    params: { id: review.id },
+                  })
+                }
+              >
+                <View style={styles.reviewTopRow}>
+                  <View style={styles.reviewerInfo}>
+                    <Text style={styles.reviewer}>
+                      {review.profiles?.display_name ||
+                        review.profiles?.username ||
+                        'User'}
+                    </Text>
+
+                    <Text style={styles.handle}>
+                      @{review.profiles?.username ?? 'unknown'}
+                    </Text>
+                  </View>
+
+                  <Text style={styles.reviewRating}>
+                    {review.rating}★
                   </Text>
                 </View>
 
-                <Text style={styles.reviewRating}>
-                  {review.rating}★
-                </Text>
-              </View>
-
-              {review.review_text ? (
-                <Text
-                  style={styles.reviewText}
-                  numberOfLines={3}
-                >
-                  {review.review_text}
-                </Text>
-              ) : null}
-            </TouchableOpacity>
-          ))
-        )}
+                {review.review_text ? (
+                  <Text
+                    style={styles.reviewText}
+                    numberOfLines={3}
+                  >
+                    {review.review_text}
+                  </Text>
+                ) : null}
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
       </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    padding: 24,
-    paddingTop: 70,
-    paddingBottom: 50,
+  screen: {
+    flex: 1,
     backgroundColor: Palette.background,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 50,
+  },
+  container: {
+    padding: 24,
   },
   centered: {
     flex: 1,
@@ -362,6 +437,29 @@ const styles = StyleSheet.create({
     color: Palette.textSecondary,
     fontWeight: '600',
     marginTop: 6,
+  },
+  // Equal-width buttons sharing one row, so they line up on any screen.
+  actions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 16,
+  },
+  actionButton: {
+    flex: 1,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 0,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: Palette.borderStrong,
+    borderRadius: 10,
+  },
+  actionButtonText: {
+    color: Palette.text,
+    fontSize: 14,
+    fontWeight: '600',
   },
   statsCard: {
     flexDirection: 'row',

@@ -6,10 +6,12 @@ import {
     Modal,
     Pressable,
     ScrollView,
+    StyleProp,
     StyleSheet,
     Text,
     TouchableOpacity,
     View,
+    ViewStyle,
 } from 'react-native';
 
 import { fetchUserLists, ListSummary, ListType } from '@/lib/lists';
@@ -19,9 +21,14 @@ import { Palette } from '@/constants/theme';
 type AddToListButtonProps = {
   listType: ListType;
   targetId: string;
+  style?: StyleProp<ViewStyle>;
 };
 
-export function AddToListButton({ listType, targetId }: AddToListButtonProps) {
+export function AddToListButton({
+  listType,
+  targetId,
+  style,
+}: AddToListButtonProps) {
   const [open, setOpen] = useState(false);
   const [lists, setLists] = useState<ListSummary[]>([]);
   const [containing, setContaining] = useState<Set<string>>(new Set());
@@ -131,8 +138,10 @@ export function AddToListButton({ listType, targetId }: AddToListButtonProps) {
 
   return (
     <>
-      <TouchableOpacity style={styles.button} onPress={openSheet}>
-        <Text style={styles.buttonText}>+ Add to List</Text>
+      <TouchableOpacity style={[styles.button, style]} onPress={openSheet}>
+        <Text style={styles.buttonText} numberOfLines={1}>
+          + Add to List
+        </Text>
       </TouchableOpacity>
 
       <Modal

@@ -1,5 +1,5 @@
 import * as ImagePicker from "expo-image-picker";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 
 import * as Location from "expo-location";
 
@@ -105,6 +105,12 @@ type TaggableFriend = {
 };
 
 export default function LogScreen() {
+  // Restaurant and dish pages can open this tab with these filled in.
+  const prefill = useLocalSearchParams<{
+    restaurantId?: string;
+    dishName?: string;
+  }>();
+
   const [restaurantName, setRestaurantName] = useState("");
 
   const [restaurantResults, setRestaurantResults] = useState<
@@ -291,6 +297,49 @@ export default function LogScreen() {
     // restaurantName and website are set together with googlePlaceId.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRestaurantId, googlePlaceId]);
+
+  useEffect(() => {
+    const restaurantId = prefill.restaurantId;
+
+    if (!restaurantId) {
+      return;
+    }
+
+    const prefillDishName = prefill.dishName;
+
+    let cancelled = false;
+
+    async function prefillFromParams() {
+      const { data, error } = await supabase
+        .from("restaurants")
+        .select(
+          "id, name, city, state, latitude, longitude, address, google_place_id",
+        )
+        .eq("id", restaurantId)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (error || !data) {
+        console.log("Could not prefill restaurant:", error?.message);
+      } else {
+        selectRestaurant(data as RestaurantResult);
+
+        if (prefillDishName) {
+          setDishName(prefillDishName);
+        }
+      }
+
+      // Clear so reopening the tab later starts fresh.
+      router.setParams({ restaurantId: undefined, dishName: undefined });
+    }
+
+    prefillFromParams();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [prefill.restaurantId, prefill.dishName]);
 
   // Show the user's existing rating for this location; logging again updates it.
   useEffect(() => {

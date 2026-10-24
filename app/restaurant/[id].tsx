@@ -11,7 +11,16 @@ import {
 } from 'react-native';
 
 import { AddToListButton } from '@/components/add-to-list-button';
-import { getBrandLocationIds } from '@/lib/brands';
+import {
+  CoverPhoto,
+  CoverPhotos,
+  fetchCoverPhotos,
+} from '@/components/cover-photos';
+import { RateRestaurantButton } from '@/components/rate-restaurant-button';
+import {
+  getBrandLocationIds,
+  getBrandLocationsNearestFirst,
+} from '@/lib/brands';
 import { supabase } from '@/lib/supabase';
 import { Palette } from '@/constants/theme';
 
@@ -21,6 +30,7 @@ type Restaurant = {
   brand_id: string | null;
   brands: {
     name: string;
+    cover_review_id: string | null;
   } | null;
 };
 
@@ -56,6 +66,7 @@ export default function RestaurantDetailScreen() {
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
   const [dishes, setDishes] = useState<DishSummary[]>([]);
   const [reviews, setReviews] = useState<RecentReview[]>([]);
+  const [coverPhotos, setCoverPhotos] = useState<CoverPhoto[]>([]);
   const [restaurantRating, setRestaurantRating] = useState(0);
   const [ratingCount, setRatingCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -76,7 +87,7 @@ export default function RestaurantDetailScreen() {
     try {
       const { data: restaurantData, error: restaurantError } = await supabase
         .from('restaurants')
-        .select('id, name, brand_id, brands (name)')
+        .select('id, name, brand_id, brands (name, cover_review_id)')
         .eq('id', id)
         .maybeSingle();
 
@@ -134,6 +145,13 @@ export default function RestaurantDetailScreen() {
       if (dishError) throw new Error(dishError.message);
 
       const dishIds = (dishData ?? []).map((dish) => dish.id as string);
+
+      setCoverPhotos(
+        await fetchCoverPhotos(
+          dishIds,
+          restaurantRow.brands?.cover_review_id ?? null
+        )
+      );
 
       const { data: reviewData, error: reviewError } =
         dishIds.length > 0
@@ -227,6 +245,30 @@ export default function RestaurantDetailScreen() {
     }
   }
 
+  // Open the Log tab at the user's nearest location of this restaurant.
+  async function logDishHere() {
+    if (!restaurant) {
+      return;
+    }
+
+    try {
+      const [nearest] = await getBrandLocationsNearestFirst(
+        restaurant.id,
+        restaurant.brand_id
+      );
+
+      router.navigate({
+        pathname: '/(tabs)/log',
+        params: { restaurantId: nearest?.id ?? restaurant.id },
+      });
+    } catch (error) {
+      Alert.alert(
+        'Restaurant error',
+        error instanceof Error ? error.message : 'Could not open the log.'
+      );
+    }
+  }
+
   function renderDishRow(dish: DishSummary) {
     return (
       <TouchableOpacity
@@ -291,8 +333,10 @@ export default function RestaurantDetailScreen() {
       style={styles.screen}
       contentContainerStyle={styles.scrollContent}
     >
-      {/* Placeholder until restaurant photos are supported */}
-      <View style={styles.photoPlaceholder} />
+      <CoverPhotos
+        photos={coverPhotos}
+        title={restaurant.brands?.name ?? restaurant.name}
+      />
 
       <View style={styles.container}>
         <View style={styles.headerRow}>
@@ -313,7 +357,27 @@ export default function RestaurantDetailScreen() {
           </View>
         </View>
 
-        <AddToListButton listType="restaurant" targetId={restaurant.id} />
+        <View style={styles.actions}>
+          <RateRestaurantButton
+            restaurantId={restaurant.id}
+            brandId={restaurant.brand_id}
+            restaurantName={restaurant.brands?.name ?? restaurant.name}
+            onSaved={loadRestaurant}
+            style={styles.actionButton}
+          />
+
+          <TouchableOpacity style={styles.actionButton} onPress={logDishHere}>
+            <Text style={styles.actionButtonText} numberOfLines={1}>
+              + Log a dish
+            </Text>
+          </TouchableOpacity>
+
+          <AddToListButton
+            listType="restaurant"
+            targetId={restaurant.id}
+            style={styles.actionButton}
+          />
+        </View>
 
         {topItems.length > 0 ? (
           <View style={styles.section}>
@@ -398,11 +462,6 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingBottom: 50,
   },
-  photoPlaceholder: {
-    width: '100%',
-    height: 220,
-    backgroundColor: Palette.elevated,
-  },
   container: {
     padding: 24,
   },
@@ -442,6 +501,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Palette.textMuted,
     marginTop: 4,
+  },
+  // Equal-width buttons sharing one row, so they line up on any screen.
+  actions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 16,
+  },
+  actionButton: {
+    flex: 1,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 0,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: Palette.borderStrong,
+    borderRadius: 10,
+  },
+  actionButtonText: {
+    color: Palette.text,
+    fontSize: 14,
+    fontWeight: '600',
   },
   section: {
     marginTop: 30,
