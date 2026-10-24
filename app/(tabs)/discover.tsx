@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
+import { fetchTags, Tag } from '@/lib/tags';
 import { Palette } from '@/constants/theme';
 
 type SearchType = 'users' | 'restaurants' | 'dishes';
@@ -128,6 +129,17 @@ export default function DiscoverScreen() {
   const [topDishes, setTopDishes] =
     useState<ExploreDish[]>([]);
 
+  const [allTags, setAllTags] = useState<Tag[]>([]);
+
+  // null = "All": the regular Top Rated Dishes list.
+  const [selectedTag, setSelectedTag] =
+    useState<string | null>(null);
+
+  const [tagDishes, setTagDishes] =
+    useState<ExploreDish[]>([]);
+
+  const [tagLoading, setTagLoading] = useState(false);
+
   const [
     mostReviewedRestaurants,
     setMostReviewedRestaurants,
@@ -142,6 +154,7 @@ export default function DiscoverScreen() {
     useCallback(() => {
       loadFollowing();
       loadExplore();
+      loadTags();
     }, [])
   );
 
@@ -673,6 +686,96 @@ export default function DiscoverScreen() {
     );
 
     setExploreLoading(false);
+  }
+
+  async function loadTags() {
+    try {
+      setAllTags(await fetchTags());
+    } catch (error) {
+      console.log('Could not load tags:', error);
+    }
+  }
+
+  async function selectTag(slug: string | null) {
+    setSelectedTag(slug);
+    setTagDishes([]);
+
+    if (!slug) {
+      return;
+    }
+
+    setTagLoading(true);
+
+    const { data, error } = await supabase.rpc(
+      'top_dishes_by_tag',
+      { p_tag: slug }
+    );
+
+    setTagLoading(false);
+
+    if (error) {
+      console.log('Top dishes by tag error:', error.message);
+      return;
+    }
+
+    setTagDishes(
+      (data ?? []).map(
+        (row: {
+          dish_id: string;
+          name: string;
+          restaurant_name: string;
+          average_rating: number;
+          review_count: number;
+        }) => ({
+          id: row.dish_id,
+          name: row.name,
+          restaurantName: row.restaurant_name,
+          city: null,
+          averageRating: Number(row.average_rating),
+          reviewCount: row.review_count,
+        })
+      )
+    );
+  }
+
+  function renderRankedDish(
+    dish: ExploreDish,
+    index: number
+  ) {
+    return (
+      <TouchableOpacity
+        key={dish.id}
+        style={styles.rankingRow}
+        onPress={() =>
+          router.push({
+            pathname: '/dish/[id]',
+            params: {
+              id: dish.id,
+            },
+          })
+        }
+      >
+        <Text style={styles.rankNumber}>
+          {index + 1}
+        </Text>
+
+        <View style={styles.rankingInfo}>
+          <Text style={styles.rankingName}>
+            {dish.name}
+          </Text>
+
+          <Text style={styles.rankingSubtext}>
+            {dish.restaurantName}
+
+            {dish.city ? ` · ${dish.city}` : ''}
+          </Text>
+        </View>
+
+        <Text style={styles.rankingRating}>
+          {dish.averageRating.toFixed(1)}★
+        </Text>
+      </TouchableOpacity>
+    );
   }
 
   function clearResults() {
@@ -1698,57 +1801,50 @@ export default function DiscoverScreen() {
                 Top Rated Dishes
               </Text>
 
-              {topDishes.map(
-                (dish, index) => (
-                  <TouchableOpacity
-                    key={dish.id}
-                    style={styles.rankingRow}
-                    onPress={() =>
-                      router.push({
-                        pathname:
-                          '/dish/[id]',
-                        params: {
-                          id: dish.id,
-                        },
-                      })
-                    }
-                  >
-                    <Text style={styles.rankNumber}>
-                      {index + 1}
-                    </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.tagChips}
+              >
+                {[{ slug: null, label: 'All' }, ...allTags].map(
+                  (tag) => {
+                    const selected = tag.slug === selectedTag;
 
-                    <View
-                      style={styles.rankingInfo}
-                    >
-                      <Text
-                        style={styles.rankingName}
+                    return (
+                      <TouchableOpacity
+                        key={tag.slug ?? 'all'}
+                        style={[
+                          styles.tagChip,
+                          selected && styles.tagChipSelected,
+                        ]}
+                        onPress={() => selectTag(tag.slug)}
                       >
-                        {dish.name}
-                      </Text>
+                        <Text
+                          style={[
+                            styles.tagChipText,
+                            selected &&
+                              styles.tagChipTextSelected,
+                          ]}
+                        >
+                          {tag.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  }
+                )}
+              </ScrollView>
 
-                      <Text
-                        style={
-                          styles.rankingSubtext
-                        }
-                      >
-                        {dish.restaurantName}
-
-                        {dish.city
-                          ? ` · ${dish.city}`
-                          : ''}
-                      </Text>
-                    </View>
-
-                    <Text
-                      style={styles.rankingRating}
-                    >
-                      {dish.averageRating.toFixed(
-                        1
-                      )}
-                      ★
-                    </Text>
-                  </TouchableOpacity>
-                )
+              {!selectedTag ? (
+                topDishes.map(renderRankedDish)
+              ) : tagLoading ? (
+                <ActivityIndicator style={styles.tagLoading} />
+              ) : tagDishes.length > 0 ? (
+                tagDishes.map(renderRankedDish)
+              ) : (
+                <Text style={styles.tagEmptyText}>
+                  No top dishes here yet. A tag shows up once two
+                  people tag the same dish.
+                </Text>
               )}
 
               <Text
@@ -2120,6 +2216,38 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
+  tagChips: {
+    gap: 8,
+    paddingBottom: 12,
+  },
+  tagChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Palette.borderStrong,
+  },
+  tagChipSelected: {
+    backgroundColor: Palette.accent,
+    borderColor: Palette.accent,
+  },
+  tagChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Palette.textSecondary,
+  },
+  tagChipTextSelected: {
+    color: Palette.text,
+  },
+  tagLoading: {
+    marginVertical: 16,
+  },
+  tagEmptyText: {
+    fontSize: 14,
+    color: Palette.textMuted,
+    lineHeight: 20,
+    paddingVertical: 8,
+  },
   rankingRow: {
     flexDirection: 'row',
     alignItems: 'center',

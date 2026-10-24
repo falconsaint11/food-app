@@ -21,6 +21,7 @@ import {
   getBrandLocationsNearestFirst,
 } from '@/lib/brands';
 import { supabase } from '@/lib/supabase';
+import { fetchDishPublicTags, Tag } from '@/lib/tags';
 import { Palette } from '@/constants/theme';
 
 type Dish = {
@@ -59,6 +60,7 @@ export default function DishDetailScreen() {
   const [dish, setDish] = useState<Dish | null>(null);
   const [reviews, setReviews] = useState<DishReview[]>([]);
   const [coverPhotos, setCoverPhotos] = useState<CoverPhoto[]>([]);
+  const [dishTags, setDishTags] = useState<Tag[]>([]);
   const [averageRating, setAverageRating] = useState(0);
   const [rankingCount, setRankingCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -150,6 +152,7 @@ export default function DishDetailScreen() {
     }
 
     setCoverPhotos(await fetchCoverPhotos(sameDishIds, pinnedReviewId));
+    setDishTags(await fetchDishPublicTags(sameDishIds));
 
     const { data: reviewData, error: reviewError } = await supabase
       .from('reviews')
@@ -276,6 +279,16 @@ export default function DishDetailScreen() {
               {dish.restaurants.brands?.name ?? dish.restaurants.name}
             </Text>
           </TouchableOpacity>
+        ) : null}
+
+        {dishTags.length > 0 ? (
+          <View style={styles.tagRow}>
+            {dishTags.map((tag) => (
+              <View key={tag.slug} style={styles.tag}>
+                <Text style={styles.tagText}>{tag.label}</Text>
+              </View>
+            ))}
+          </View>
         ) : null}
 
         <View style={styles.actions}>
@@ -439,6 +452,23 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   // Equal-width buttons sharing one row, so they line up on any screen.
+  tagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+  },
+  tag: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: Palette.elevated,
+  },
+  tagText: {
+    color: Palette.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
   actions: {
     flexDirection: 'row',
     gap: 10,
