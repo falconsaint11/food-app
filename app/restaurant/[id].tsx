@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 
 import { AddToListButton } from '@/components/add-to-list-button';
-import { dishKey, getBrandLocationIds } from '@/lib/brands';
+import { getBrandLocationIds } from '@/lib/brands';
 import { supabase } from '@/lib/supabase';
 import { Palette } from '@/constants/theme';
 
@@ -128,7 +128,7 @@ export default function RestaurantDetailScreen() {
 
       const { data: dishData, error: dishError } = await supabase
         .from('dishes')
-        .select('id, name')
+        .select('id, name, name_key')
         .in('restaurant_id', locationIds);
 
       if (dishError) throw new Error(dishError.message);
@@ -180,7 +180,7 @@ export default function RestaurantDetailScreen() {
 
       for (const dish of dishData ?? []) {
         const ratings = ratingsByDishId.get(dish.id) ?? [];
-        const key = dishKey(dish.name);
+        const key = dish.name_key as string;
         const group = groups.get(key);
 
         if (!group) {

@@ -24,8 +24,3 @@ export async function getBrandLocationIds(
 
   return ids.length > 0 ? ids : [restaurantId];
 }
-
-// Dishes are stored per location, so "Big Mac" at two McDonald's are two rows.
-export function dishKey(name: string) {
-  return name.trim().toLowerCase();
-}

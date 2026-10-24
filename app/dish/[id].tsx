@@ -11,13 +11,14 @@ import {
 } from 'react-native';
 
 import { AddToListButton } from '@/components/add-to-list-button';
-import { dishKey, getBrandLocationIds } from '@/lib/brands';
+import { getBrandLocationIds } from '@/lib/brands';
 import { supabase } from '@/lib/supabase';
 import { Palette } from '@/constants/theme';
 
 type Dish = {
   id: string;
   name: string;
+  name_key: string;
   category: string | null;
   price: number | null;
   restaurants: {
@@ -70,6 +71,7 @@ export default function DishDetailScreen() {
       .select(`
         id,
         name,
+        name_key,
         category,
         price,
         restaurants (
@@ -109,13 +111,13 @@ export default function DishDetailScreen() {
 
         const { data: siblingData, error: siblingError } = await supabase
           .from('dishes')
-          .select('id, name')
+          .select('id, name_key')
           .in('restaurant_id', locationIds);
 
         if (siblingError) throw new Error(siblingError.message);
 
         sameDishIds = (siblingData ?? [])
-          .filter((sibling) => dishKey(sibling.name) === dishKey(dishRow.name))
+          .filter((sibling) => sibling.name_key === dishRow.name_key)
           .map((sibling) => sibling.id as string);
       } catch (error) {
         setLoading(false);

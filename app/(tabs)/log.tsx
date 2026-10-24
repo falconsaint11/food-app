@@ -20,7 +20,7 @@ import {
 } from "react-native";
 
 import { StarRatingInput } from "@/components/star-rating-input";
-import { dishKey, getBrandLocationIds } from "@/lib/brands";
+import { getBrandLocationIds } from "@/lib/brands";
 import { supabase } from "@/lib/supabase";
 import { Palette } from "@/constants/theme";
 
@@ -49,6 +49,16 @@ type DishResult = {
 
   restaurant_id: string;
 };
+
+type DishMatch = DishResult & {
+  score: number;
+
+  is_exact: boolean;
+};
+
+// How close a typed name must be to an existing dish before we ask
+// "Did you mean ...?" ("fry" vs "French Fries" qualifies, "fry sauce" doesn't).
+const SIMILAR_DISH_PROMPT_SCORE = 0.5;
 
 type GooglePlaceSuggestion = {
   placePrediction?: {
@@ -789,38 +799,54 @@ export default function LogScreen() {
       return;
     }
 
-    const { data, error } = await supabase
+    try {
+      setDishResults(await searchDishMatches(menuLocationIds, trimmed));
+    } catch (error) {
+      console.log("Dish search error:", error);
+    }
+  }
 
-      .from("dishes")
+  // Fuzzy search ("fry" finds "French Fries"), one result per dish name.
+  async function searchDishMatches(
+    locationIds: string[],
+    text: string,
+    limit = 8,
+  ) {
+    const { data, error } = await supabase.rpc("search_dishes", {
+      p_location_ids: locationIds,
 
-      .select("id, name, restaurant_id")
+      p_query: text,
 
-      .in("restaurant_id", menuLocationIds)
+      p_current_restaurant_id: selectedRestaurantId,
 
-      .ilike("name", `%${trimmed}%`)
-
-      .limit(30);
+      p_limit: limit,
+    });
 
     if (error) {
-      console.log("Dish search error:", error.message);
-
-      return;
+      throw new Error(error.message);
     }
 
-    // Each location has its own row for the same dish; show each name once,
-    // preferring this location's row.
-    const uniqueDishes = new Map<string, DishResult>();
+    return (data ?? []) as DishMatch[];
+  }
 
-    for (const dish of (data ?? []) as DishResult[]) {
-      const key = dishKey(dish.name);
-      const existing = uniqueDishes.get(key);
+  function askAboutSimilarDish(match: DishResult, typedName: string) {
+    return new Promise<"use" | "new" | "cancel">((resolve) => {
+      Alert.alert(
+        `Did you mean "${match.name}"?`,
 
-      if (!existing || dish.restaurant_id === selectedRestaurantId) {
-        uniqueDishes.set(key, dish);
-      }
-    }
+        `"${match.name}" is already on this restaurant's menu. Using it keeps all its ratings together.`,
 
-    setDishResults([...uniqueDishes.values()].slice(0, 8));
+        [
+          { text: "Cancel", style: "cancel", onPress: () => resolve("cancel") },
+
+          { text: `Add "${typedName}"`, onPress: () => resolve("new") },
+
+          { text: `Use "${match.name}"`, onPress: () => resolve("use") },
+        ],
+
+        { cancelable: true, onDismiss: () => resolve("cancel") },
+      );
+    });
   }
 
   function selectDish(dish: DishResult) {
@@ -993,33 +1019,27 @@ export default function LogScreen() {
     return newRestaurant.id;
   }
 
-  async function findOrCreateDish(restaurantId: string) {
-    // A dish picked from another location of the brand gets its own row here,
+  async function findOrCreateDish(
+    restaurantId: string,
+    match: DishResult | null,
+  ) {
+    // A dish matched at another location of the brand gets its own row here,
     // so the review stays tied to the location the user actually visited.
-    if (selectedDishId && selectedDishRestaurantId === restaurantId) {
-      return selectedDishId;
+    if (match?.restaurant_id === restaurantId) {
+      return match.id;
     }
 
-    const trimmedDishName = dishName.trim();
+    // Reuse the brand's existing name so the dish groups across locations.
+    const trimmedDishName = match?.name ?? dishName.trim();
 
-    const { data: exactMatches, error: exactError } = await supabase
+    const [existing] = await searchDishMatches(
+      [restaurantId],
+      trimmedDishName,
+      1,
+    );
 
-      .from("dishes")
-
-      .select("id, name")
-
-      .eq("restaurant_id", restaurantId)
-
-      .ilike("name", trimmedDishName)
-
-      .limit(1);
-
-    if (exactError) {
-      throw new Error(exactError.message);
-    }
-
-    if (exactMatches && exactMatches.length > 0) {
-      return exactMatches[0].id;
+    if (existing?.is_exact) {
+      return existing.id;
     }
 
     const { data: newDish, error: insertError } = await supabase
@@ -1074,6 +1094,43 @@ export default function LogScreen() {
       return;
     }
 
+    let matchedDish: DishResult | null =
+      selectedDishId && selectedDishRestaurantId
+        ? {
+            id: selectedDishId,
+            name: dishName.trim(),
+            restaurant_id: selectedDishRestaurantId,
+          }
+        : null;
+
+    // Before creating a new dish, use an exact match ("Large Fries" -> "Fries")
+    // or ask about a close one ("Fry" -> "French Fries").
+    if (!matchedDish && menuLocationIds.length > 0) {
+      try {
+        const [best] = await searchDishMatches(
+          menuLocationIds,
+          dishName.trim(),
+          1,
+        );
+
+        if (best?.is_exact) {
+          matchedDish = best;
+        } else if (best && best.score >= SIMILAR_DISH_PROMPT_SCORE) {
+          const choice = await askAboutSimilarDish(best, dishName.trim());
+
+          if (choice === "cancel") {
+            return;
+          }
+
+          if (choice === "use") {
+            matchedDish = best;
+          }
+        }
+      } catch (error) {
+        console.log("Similar dish check error:", error);
+      }
+    }
+
     setLoading(true);
 
     const {
@@ -1095,7 +1152,7 @@ export default function LogScreen() {
     try {
       const restaurantId = await findOrCreateRestaurant();
 
-      const dishId = await findOrCreateDish(restaurantId);
+      const dishId = await findOrCreateDish(restaurantId, matchedDish);
 
       if (photoUri) {
         uploadedPhotoPath = await uploadPhoto(photoUri, user.id);
