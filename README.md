@@ -2,6 +2,16 @@
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
+## Project notes
+
+- **Expo SDK 58** (React Native 0.88). Use the SDK 58 version of Expo Go.
+  After pulling an SDK upgrade, run `npm install`, then `npx expo start -c` to
+  clear the old cache.
+- **Backend:** Supabase. Database changes are SQL files in
+  `supabase/migrations/`, run by hand in the Supabase SQL editor.
+- **How restaurants, brands, dishes, ratings and cover photos work**, plus
+  admin SQL commands: [docs/restaurants-and-ratings.md](docs/restaurants-and-ratings.md).
+
 ## Get started
 
 1. Install dependencies
