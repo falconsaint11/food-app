@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import { AddToListButton } from '@/components/add-to-list-button';
+import { ContentMenu } from '@/components/content-menu';
 import {
   CoverPhoto,
   CoverPhotos,
@@ -21,6 +22,7 @@ import {
   getBrandLocationIds,
   getBrandLocationsNearestFirst,
 } from '@/lib/brands';
+import { withoutHiddenUsers } from '@/lib/moderation';
 import { supabase } from '@/lib/supabase';
 import { Palette } from '@/constants/theme';
 
@@ -205,8 +207,13 @@ export default function RestaurantDetailScreen() {
         ])
       );
 
+      const visibleNotes = await withoutHiddenUsers(
+        notesData ?? [],
+        (row) => row.user_id as string
+      );
+
       setRestaurantNotes(
-        (notesData ?? []).map((row) => ({
+        visibleNotes.map((row) => ({
           id: row.id as string,
           user_id: row.user_id as string,
           rating: row.rating === null ? null : Number(row.rating),
@@ -313,7 +320,14 @@ export default function RestaurantDetailScreen() {
       dishSummaries.sort((a, b) => a.name.localeCompare(b.name));
 
       setDishes(dishSummaries);
-      setReviews(allReviews.slice(0, 10));
+      // Blocked people's ratings still count toward scores; only their posts
+      // are hidden.
+      setReviews(
+        (await withoutHiddenUsers(allReviews, (review) => review.user_id)).slice(
+          0,
+          10
+        )
+      );
     } catch (error) {
       Alert.alert(
         'Restaurant error',
@@ -514,6 +528,18 @@ export default function RestaurantDetailScreen() {
                       {note.rating}★
                     </Text>
                   ) : null}
+
+                  <ContentMenu
+                    targetType="restaurant_note"
+                    targetId={note.id}
+                    authorId={note.user_id}
+                    authorName={note.authorName}
+                    onBlocked={() =>
+                      setRestaurantNotes((current) =>
+                        current.filter((other) => other.user_id !== note.user_id)
+                      )
+                    }
+                  />
                 </View>
 
                 <Text style={styles.reviewText} numberOfLines={4}>

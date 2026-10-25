@@ -1,3 +1,4 @@
+import { withoutHiddenUsers } from '@/lib/moderation';
 import { supabase } from '@/lib/supabase';
 
 export type NotificationItem = {
@@ -244,11 +245,13 @@ export async function getNotifications() {
       };
     });
 
-  return [
-    ...followNotifications,
-    ...reactionNotifications,
-    ...commentNotifications,
-  ].sort(
+  // Nothing from blocked users (either way).
+  const visible = await withoutHiddenUsers(
+    [...followNotifications, ...reactionNotifications, ...commentNotifications],
+    (notification) => notification.actorId
+  );
+
+  return visible.sort(
     (a, b) =>
       new Date(b.createdAt).getTime() -
       new Date(a.createdAt).getTime()

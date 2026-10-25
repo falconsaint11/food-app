@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 
 import { Palette } from '@/constants/theme';
+import { unblockUser } from '@/lib/moderation';
 import { supabase } from '@/lib/supabase';
 
 // The word users type to confirm deleting their account.
@@ -24,6 +25,12 @@ const DELETE_CONFIRMATION = 'DELETE';
 const MIN_PASSWORD_LENGTH = 8;
 
 type OpenForm = 'email' | 'password' | null;
+
+type BlockedUser = {
+  id: string;
+  name: string;
+  username: string;
+};
 
 // Removes every file in the user's folder of a storage bucket. Photos are
 // stored as `<user id>/<file>` in both review-photos and profile-photos.
@@ -55,6 +62,43 @@ async function removeUserFolder(bucket: string, userId: string) {
   }
 }
 
+// People the current user blocked, newest first. Only the user's own blocks
+// are visible to them.
+async function fetchBlockedUsers(): Promise<BlockedUser[]> {
+  const { data: blocks, error } = await supabase
+    .from('blocks')
+    .select('blocked_id')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.log('Blocked users error:', error.message);
+    return [];
+  }
+
+  const ids = (blocks ?? []).map((row) => row.blocked_id as string);
+
+  if (ids.length === 0) {
+    return [];
+  }
+
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('id, username, display_name')
+    .in('id', ids);
+
+  const byId = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+
+  return ids.map((id) => {
+    const profile = byId.get(id);
+
+    return {
+      id,
+      name: profile?.display_name || profile?.username || 'Deleted user',
+      username: profile?.username ?? '',
+    };
+  });
+}
+
 export default function SettingsScreen() {
   const [email, setEmail] = useState<string | null>(null);
   const [openForm, setOpenForm] = useState<OpenForm>(null);
@@ -67,10 +111,40 @@ export default function SettingsScreen() {
   const [deleteText, setDeleteText] = useState('');
   const [deleting, setDeleting] = useState(false);
 
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
+  const [showBlocked, setShowBlocked] = useState(false);
+  const [unblockingId, setUnblockingId] = useState<string | null>(null);
+
+  async function unblock(userId: string) {
+    setUnblockingId(userId);
+
+    try {
+      await unblockUser(userId);
+      setBlockedUsers((current) => current.filter((user) => user.id !== userId));
+    } catch (error) {
+      Alert.alert(
+        'Could not unblock',
+        error instanceof Error ? error.message : 'Something went wrong.'
+      );
+    } finally {
+      setUnblockingId(null);
+    }
+  }
+
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       setEmail(user?.email ?? null);
     });
+
+    let cancelled = false;
+
+    fetchBlockedUsers().then((users) => {
+      if (!cancelled) setBlockedUsers(users);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function toggleForm(form: Exclude<OpenForm, null>) {
@@ -290,6 +364,51 @@ export default function SettingsScreen() {
           ) : null}
         </View>
 
+        <Text style={[styles.sectionTitle, styles.privacyTitle]}>Privacy</Text>
+
+        <View style={styles.group}>
+          <TouchableOpacity
+            style={[styles.row, styles.lastRow]}
+            onPress={() => setShowBlocked((open) => !open)}
+          >
+            <Text style={styles.rowLabel}>Blocked users</Text>
+            <Text style={styles.rowHint}>
+              {blockedUsers.length} {showBlocked ? '⌃' : '›'}
+            </Text>
+          </TouchableOpacity>
+
+          {showBlocked ? (
+            <View style={styles.form}>
+              {blockedUsers.length === 0 ? (
+                <Text style={styles.emptyText}>
+                  You haven’t blocked anyone. Block someone from the ⋯ menu on
+                  their profile or posts.
+                </Text>
+              ) : (
+                blockedUsers.map((user) => (
+                  <View key={user.id} style={styles.blockedRow}>
+                    <View style={styles.blockedInfo}>
+                      <Text style={styles.rowLabel}>{user.name}</Text>
+                      {user.username ? (
+                        <Text style={styles.blockedHandle}>@{user.username}</Text>
+                      ) : null}
+                    </View>
+
+                    <TouchableOpacity
+                      onPress={() => unblock(user.id)}
+                      disabled={unblockingId === user.id}
+                    >
+                      <Text style={styles.unblockText}>
+                        {unblockingId === user.id ? 'Unblocking...' : 'Unblock'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </View>
+          ) : null}
+        </View>
+
         <TouchableOpacity style={styles.logOutButton} onPress={confirmLogOut}>
           <Text style={styles.logOutText}>Log Out</Text>
         </TouchableOpacity>
@@ -458,6 +577,34 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.5,
+  },
+  privacyTitle: {
+    marginTop: 28,
+  },
+  emptyText: {
+    color: Palette.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  blockedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+  },
+  blockedInfo: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  blockedHandle: {
+    color: Palette.textMuted,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  unblockText: {
+    color: Palette.accent,
+    fontSize: 14,
+    fontWeight: '600',
   },
   logOutButton: {
     marginTop: 24,

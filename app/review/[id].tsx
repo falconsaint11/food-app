@@ -16,6 +16,8 @@ import {
   View,
 } from "react-native";
 
+import { ContentMenu } from "@/components/content-menu";
+import { fetchHiddenUserIds, withoutHiddenUsers } from "@/lib/moderation";
 import { supabase } from "@/lib/supabase";
 import { Palette } from "@/constants/theme";
 
@@ -197,7 +199,16 @@ export default function ReviewDetailScreen() {
       return;
     }
 
-    setReview((data ?? null) as unknown as Review | null);
+    const loadedReview = (data ?? null) as unknown as Review | null;
+
+    // A review by someone blocked (either way) isn't shown.
+    if (loadedReview && (await fetchHiddenUserIds()).has(loadedReview.user_id)) {
+      setReview(null);
+      setLoading(false);
+      return;
+    }
+
+    setReview(loadedReview);
 
     // Load friends tagged in this review. Their tags are separate from diary entries.
     const { data: tagRows, error: tagError } = await supabase
@@ -311,7 +322,12 @@ export default function ReviewDetailScreen() {
       return;
     }
 
-    setComments((commentData ?? []) as unknown as Comment[]);
+    setComments(
+      await withoutHiddenUsers(
+        (commentData ?? []) as unknown as Comment[],
+        (comment) => comment.user_id,
+      ),
+    );
   }
 
   async function deleteReview() {
@@ -689,7 +705,7 @@ export default function ReviewDetailScreen() {
   if (!review) {
     return (
       <View style={styles.centered}>
-        <Text style={styles.notFound}>Review not found.</Text>
+        <Text style={styles.notFound}>This review isn’t available.</Text>
       </View>
     );
   }
@@ -707,44 +723,58 @@ export default function ReviewDetailScreen() {
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
       >
-        <TouchableOpacity
-          style={styles.userRow}
-          onPress={() => {
-            if (isOwnReview) {
-              router.push("/profile");
-            } else {
-              router.push(`/user/${review.user_id}`);
+        <View style={styles.userHeader}>
+          <TouchableOpacity
+            style={styles.userRow}
+            onPress={() => {
+              if (isOwnReview) {
+                router.push("/profile");
+              } else {
+                router.push(`/user/${review.user_id}`);
+              }
+            }}
+          >
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {(
+                  review.profiles?.display_name ||
+                  review.profiles?.username ||
+                  "U"
+                )
+
+                  .charAt(0)
+
+                  .toUpperCase()}
+              </Text>
+            </View>
+
+            <View style={styles.userInfo}>
+              <Text style={styles.userName}>
+                {review.profiles?.display_name ||
+                  review.profiles?.username ||
+                  "User"}
+
+                {isOwnReview ? " · You" : ""}
+              </Text>
+
+              <Text style={styles.userHandle}>
+                @{review.profiles?.username ?? "unknown"}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          <ContentMenu
+            targetType="review"
+            targetId={String(review.id)}
+            authorId={review.user_id}
+            authorName={
+              review.profiles?.display_name ||
+              review.profiles?.username ||
+              "this user"
             }
-          }}
-        >
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {(
-                review.profiles?.display_name ||
-                review.profiles?.username ||
-                "U"
-              )
-
-                .charAt(0)
-
-                .toUpperCase()}
-            </Text>
-          </View>
-
-          <View style={styles.userInfo}>
-            <Text style={styles.userName}>
-              {review.profiles?.display_name ||
-                review.profiles?.username ||
-                "User"}
-
-              {isOwnReview ? " · You" : ""}
-            </Text>
-
-            <Text style={styles.userHandle}>
-              @{review.profiles?.username ?? "unknown"}
-            </Text>
-          </View>
-        </TouchableOpacity>
+            onBlocked={() => router.back()}
+          />
+        </View>
 
         <View style={styles.reviewCard}>
           <View style={styles.foodRow}>
@@ -979,7 +1009,25 @@ export default function ReviewDetailScreen() {
                       >
                         <Text style={styles.deleteComment}>Delete</Text>
                       </TouchableOpacity>
-                    ) : null}
+                    ) : (
+                      <ContentMenu
+                        targetType="comment"
+                        targetId={String(comment.id)}
+                        authorId={comment.user_id}
+                        authorName={
+                          comment.profiles?.display_name ||
+                          comment.profiles?.username ||
+                          "this user"
+                        }
+                        onBlocked={() =>
+                          setComments((current) =>
+                            current.filter(
+                              (other) => other.user_id !== comment.user_id,
+                            ),
+                          )
+                        }
+                      />
+                    )}
                   </View>
 
                   <Text style={styles.commentText}>{comment.comment_text}</Text>
@@ -1032,12 +1080,20 @@ const styles = StyleSheet.create({
     color: Palette.textSecondary,
   },
 
-  userRow: {
+  userHeader: {
     flexDirection: "row",
 
     alignItems: "center",
 
     marginBottom: 24,
+  },
+
+  userRow: {
+    flex: 1,
+
+    flexDirection: "row",
+
+    alignItems: "center",
   },
 
   avatar: {

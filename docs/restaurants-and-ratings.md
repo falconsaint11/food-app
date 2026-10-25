@@ -178,7 +178,7 @@ their ranking numbers.
 
 ## Migrations
 
-Run in order in the Supabase SQL editor. All except `20261030000000_delete_my_account.sql`
+Run in order in the Supabase SQL editor. All except `20261031000000_report_and_block.sql`
 have already been run on the shared project.
 
 | File | What it does |
@@ -194,6 +194,7 @@ have already been run on the shared project.
 | `20261028000000_restaurant_visits.sql` | Turns `restaurant_ratings` into a visit log: no more one-per-user limit, optional `rating`, `visited_at` |
 | `20261029000000_restaurant_visit_notes.sql` | Optional `notes` on each visit (max 2,000 characters) |
 | `20261030000000_delete_my_account.sql` | `delete_my_account()` and a storage rule letting users delete their own photo folders |
+| `20261031000000_report_and_block.sql` | `reports` and `blocks` tables, `block_user()`, `my_hidden_user_ids()`, triggers refusing follows/comments/tags between blocked users |
 
 Don't add a foreign key from `dishes` to `reviews`. `reviews.dish_id` already
 links them, and a second link breaks every `reviews … dishes (…)` query.
@@ -217,6 +218,31 @@ Deleting an account (type DELETE to confirm):
 **If you add a table that points at users or reviews, add it to
 `delete_my_account()`.** Otherwise deleting an account fails with an error
 (nothing is deleted), which blocks App Store-required deletion.
+
+## Reporting and blocking
+
+Required by the App Store for apps where people post content.
+
+- **⋯ menu** (`components/content-menu.tsx`) on reviews, comments, restaurant
+  notes and profiles: **Report** (pick a reason) and **Block**. It doesn't
+  show on your own content.
+- **Reports** go to the `reports` table. **Check open reports in Supabase
+  (`status = 'open'`) at least daily**: Apple expects action within about a
+  day. Delete the content (or the account) if needed, then set `status` to
+  `resolved` or `dismissed`. One report per person per item.
+- **Blocking** (`block_user()`) removes follows both ways and friend tags on
+  each other's reviews. Database triggers refuse new follows, comments and
+  friend tags between the two.
+- **Hiding:** `my_hidden_user_ids()` returns everyone blocked either way
+  without saying which. `lib/moderation.ts` caches it and
+  `withoutHiddenUsers()` filters lists: review comments, restaurant and dish
+  review lists, restaurant notes, notifications and user search. A blocked
+  person's review page and profile show as unavailable (or "You blocked this
+  user" with Unblock). Their ratings still count toward averages.
+- **Settings → Blocked users** lists who you blocked, with Unblock.
+
+**New screens that show other people's posts should filter them with
+`withoutHiddenUsers()` and add a `<ContentMenu>`.**
 
 ## Known gaps
 

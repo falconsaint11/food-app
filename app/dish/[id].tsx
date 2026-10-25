@@ -20,6 +20,7 @@ import {
   getBrandLocationIds,
   getBrandLocationsNearestFirst,
 } from '@/lib/brands';
+import { withoutHiddenUsers } from '@/lib/moderation';
 import { supabase } from '@/lib/supabase';
 import { fetchDishPublicTags, Tag } from '@/lib/tags';
 import { Palette } from '@/constants/theme';
@@ -180,7 +181,11 @@ export default function DishDetailScreen() {
     const typedReviews =
       (reviewData ?? []) as unknown as DishReview[];
 
-    setReviews(typedReviews);
+    // Blocked people's ratings still count toward the average; only their
+    // reviews are hidden.
+    setReviews(
+      await withoutHiddenUsers(typedReviews, (review) => review.user_id)
+    );
 
     if (typedReviews.length > 0) {
       const total = typedReviews.reduce(

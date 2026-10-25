@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
+import { withoutHiddenUsers } from '@/lib/moderation';
 import { fetchTags, Tag } from '@/lib/tags';
 import { Palette } from '@/constants/theme';
 
@@ -848,7 +849,9 @@ export default function DiscoverScreen() {
         return;
       }
 
-      setUserResults(data ?? []);
+      setUserResults(
+        await withoutHiddenUsers(data ?? [], (result) => result.id)
+      );
       setRestaurantResults([]);
       setDishResults([]);
 

@@ -13,7 +13,9 @@ import {
   View,
 } from "react-native";
 
+import { ContentMenu } from '@/components/content-menu';
 import { ListsSection } from '@/components/lists-section';
+import { fetchHiddenUserIds, unblockUser } from '@/lib/moderation';
 import { supabase } from '@/lib/supabase';
 import { Palette } from '@/constants/theme';
 
@@ -115,6 +117,14 @@ export default function UserProfileScreen() {
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
+  // "blocked" = the current user blocked them; "unavailable" = they blocked
+  // the current user (we don't say which).
+  const [blockState, setBlockState] = useState<
+    "none" | "blocked" | "unavailable"
+  >("none");
+
+  const [unblocking, setUnblocking] = useState(false);
+
   useFocusEffect(
     useCallback(() => {
       loadProfile();
@@ -127,6 +137,21 @@ export default function UserProfileScreen() {
     }
 
     setLoading(true);
+
+    if ((await fetchHiddenUserIds()).has(id)) {
+      // Only the user's own blocks are visible to them.
+      const { data: myBlock } = await supabase
+        .from("blocks")
+        .select("blocked_id")
+        .eq("blocked_id", id)
+        .maybeSingle();
+
+      setBlockState(myBlock ? "blocked" : "unavailable");
+      setLoading(false);
+      return;
+    }
+
+    setBlockState("none");
 
     const {
       data: profileData,
@@ -525,6 +550,48 @@ export default function UserProfileScreen() {
     );
   }
 
+  async function unblock() {
+    if (!id) return;
+
+    setUnblocking(true);
+
+    try {
+      await unblockUser(id);
+      await loadProfile();
+    } catch (error) {
+      Alert.alert(
+        "Could not unblock",
+        error instanceof Error ? error.message : "Something went wrong.",
+      );
+    } finally {
+      setUnblocking(false);
+    }
+  }
+
+  if (blockState !== "none") {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.blockedText}>
+          {blockState === "blocked"
+            ? "You blocked this user."
+            : "This profile isn’t available."}
+        </Text>
+
+        {blockState === "blocked" ? (
+          <TouchableOpacity
+            style={styles.followButton}
+            onPress={unblock}
+            disabled={unblocking}
+          >
+            <Text style={styles.followButtonText}>
+              {unblocking ? "Unblocking..." : "Unblock"}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  }
+
   if (!profile) {
     return (
       <View style={styles.centered}>
@@ -536,6 +603,15 @@ export default function UserProfileScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.profileHeader}>
+        <ContentMenu
+          targetType="user"
+          targetId={profile.id}
+          authorId={profile.id}
+          authorName={profile.display_name || profile.username}
+          onBlocked={() => setBlockState("blocked")}
+          style={styles.profileMenu}
+        />
+
         {profile.avatar_path ? (
           <Image
             source={{
@@ -954,6 +1030,17 @@ const styles = StyleSheet.create({
     maxWidth: 320,
   },
 
+  profileMenu: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    zIndex: 1,
+  },
+  blockedText: {
+    color: Palette.textMuted,
+    fontSize: 16,
+    marginBottom: 16,
+  },
   followButton: {
     minWidth: 120,
 
