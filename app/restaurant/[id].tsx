@@ -58,7 +58,19 @@ type RecentReview = {
   } | null;
 };
 
+// A visit where someone wrote about the restaurant itself.
+type RestaurantNote = {
+  id: string;
+  user_id: string;
+  rating: number | null;
+  notes: string;
+  visited_at: string;
+  authorName: string;
+};
+
 const TOP_ITEM_COUNT = 3;
+
+const RESTAURANT_NOTE_COUNT = 5;
 
 export default function RestaurantDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -70,6 +82,7 @@ export default function RestaurantDetailScreen() {
   const [restaurantRating, setRestaurantRating] = useState(0);
   const [ratingCount, setRatingCount] = useState(0);
   const [myVisitCount, setMyVisitCount] = useState(0);
+  const [restaurantNotes, setRestaurantNotes] = useState<RestaurantNote[]>([]);
   const [loading, setLoading] = useState(true);
 
   useFocusEffect(
@@ -154,6 +167,53 @@ export default function RestaurantDetailScreen() {
           ? perUserAverages.reduce((sum, rating) => sum + rating, 0) /
               perUserAverages.length
           : 0
+      );
+
+      const notesQuery = supabase
+        .from('restaurant_ratings')
+        .select('id, user_id, rating, notes, visited_at')
+        .not('notes', 'is', null)
+        .order('visited_at', { ascending: false })
+        .limit(RESTAURANT_NOTE_COUNT);
+
+      const { data: notesData, error: notesError } = restaurantRow.brand_id
+        ? await notesQuery.or(
+            `restaurant_id.in.(${locationIds.join(',')}),brand_id.eq.${restaurantRow.brand_id}`
+          )
+        : await notesQuery.in('restaurant_id', locationIds);
+
+      if (notesError) throw new Error(notesError.message);
+
+      // restaurant_ratings links to auth users, not profiles, so look up
+      // names separately.
+      const noteAuthorIds = [
+        ...new Set((notesData ?? []).map((row) => row.user_id as string)),
+      ];
+
+      const { data: authorData } =
+        noteAuthorIds.length > 0
+          ? await supabase
+              .from('profiles')
+              .select('id, username, display_name')
+              .in('id', noteAuthorIds)
+          : { data: [] };
+
+      const authorNames = new Map(
+        (authorData ?? []).map((profile) => [
+          profile.id as string,
+          (profile.display_name || profile.username || 'User') as string,
+        ])
+      );
+
+      setRestaurantNotes(
+        (notesData ?? []).map((row) => ({
+          id: row.id as string,
+          user_id: row.user_id as string,
+          rating: row.rating === null ? null : Number(row.rating),
+          notes: row.notes as string,
+          visited_at: row.visited_at as string,
+          authorName: authorNames.get(row.user_id as string) ?? 'User',
+        }))
       );
 
       const { data: dishData, error: dishError } = await supabase
@@ -424,6 +484,45 @@ export default function RestaurantDetailScreen() {
             dishes.map(renderDishRow)
           )}
         </View>
+
+        {restaurantNotes.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>What people are saying</Text>
+
+            {restaurantNotes.map((note) => (
+              <TouchableOpacity
+                key={note.id}
+                style={styles.reviewCard}
+                onPress={() =>
+                  router.push({
+                    pathname: '/user/[id]',
+                    params: { id: note.user_id },
+                  })
+                }
+              >
+                <View style={styles.reviewTopRow}>
+                  <View style={styles.reviewInfo}>
+                    <Text style={styles.reviewer}>{note.authorName}</Text>
+
+                    <Text style={styles.reviewDish}>
+                      {new Date(note.visited_at).toLocaleDateString()}
+                    </Text>
+                  </View>
+
+                  {note.rating !== null ? (
+                    <Text style={styles.reviewRating}>
+                      {note.rating}★
+                    </Text>
+                  ) : null}
+                </View>
+
+                <Text style={styles.reviewText} numberOfLines={4}>
+                  {note.notes}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Recent Reviews</Text>

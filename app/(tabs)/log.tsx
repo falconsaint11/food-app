@@ -217,6 +217,8 @@ export default function LogScreen() {
   // Optional, separate from dish ratings. 0 means "not rated".
   const [restaurantRating, setRestaurantRating] = useState(0);
 
+  const [restaurantNotes, setRestaurantNotes] = useState("");
+
   const [friends, setFriends] = useState<TaggableFriend[]>([]);
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
   const [friendSearch, setFriendSearch] = useState("");
@@ -394,6 +396,8 @@ export default function LogScreen() {
     setWebsite(null);
 
     setRestaurantRating(0);
+
+    setRestaurantNotes("");
 
     setAddress("");
 
@@ -867,6 +871,7 @@ export default function LogScreen() {
       user_id: userId,
       restaurant_id: restaurantId,
       rating: restaurantRating > 0 ? restaurantRating : null,
+      notes: restaurantNotes.trim() || null,
     });
 
     if (error) {
@@ -1476,6 +1481,20 @@ export default function LogScreen() {
           compact
         />
 
+        {/* Revealed once the restaurant is rated, to keep the screen short. */}
+        {restaurantRating > 0 || restaurantNotes ? (
+          <TextInput
+            style={styles.restaurantNotesInput}
+            placeholder="What stood out about the restaurant? (optional)"
+            placeholderTextColor={Palette.textMuted}
+            multiline
+            maxLength={2000}
+            value={restaurantNotes}
+            onChangeText={setRestaurantNotes}
+            editable={!loading}
+          />
+        ) : null}
+
         <TouchableOpacity onPress={() => setShowFriends((open) => !open)}>
           <Text style={styles.friendsToggle}>
             {showFriends
@@ -1807,6 +1826,26 @@ const styles = StyleSheet.create({
     color: Palette.textMuted,
 
     fontWeight: "600",
+  },
+
+  restaurantNotesInput: {
+    borderWidth: 1,
+
+    borderColor: Palette.borderStrong,
+
+    borderRadius: 10,
+
+    padding: 12,
+
+    minHeight: 80,
+
+    fontSize: 15,
+
+    color: Palette.text,
+
+    textAlignVertical: "top",
+
+    marginBottom: 16,
   },
 
   friendsToggle: {

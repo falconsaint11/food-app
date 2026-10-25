@@ -7,6 +7,7 @@ import {
   StyleProp,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
   ViewStyle,
@@ -40,6 +41,7 @@ export function RateRestaurantButton({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [rating, setRating] = useState(0);
+  const [notes, setNotes] = useState('');
   const [pastRatings, setPastRatings] = useState<number[]>([]);
 
   async function openSheet() {
@@ -74,6 +76,7 @@ export function RateRestaurantButton({
 
       setPastRatings((data ?? []).map((row) => Number(row.rating)));
       setRating(0);
+      setNotes('');
     } catch (error) {
       setOpen(false);
       Alert.alert(
@@ -103,8 +106,18 @@ export function RateRestaurantButton({
         .from('restaurant_ratings')
         .insert(
           brandId
-            ? { user_id: user.id, brand_id: brandId, rating }
-            : { user_id: user.id, restaurant_id: restaurantId, rating }
+            ? {
+                user_id: user.id,
+                brand_id: brandId,
+                rating,
+                notes: notes.trim() || null,
+              }
+            : {
+                user_id: user.id,
+                restaurant_id: restaurantId,
+                rating,
+                notes: notes.trim() || null,
+              }
         );
 
       if (error) throw new Error(error.message);
@@ -155,6 +168,16 @@ export function RateRestaurantButton({
           ) : (
             <>
               <StarRatingInput value={rating} onChange={setRating} />
+
+              <TextInput
+                style={styles.notesInput}
+                placeholder="What stood out? (optional)"
+                placeholderTextColor={Palette.textMuted}
+                multiline
+                maxLength={2000}
+                value={notes}
+                onChangeText={setNotes}
+              />
 
               <TouchableOpacity
                 style={[
@@ -217,6 +240,17 @@ const styles = StyleSheet.create({
   },
   loading: {
     marginVertical: 24,
+  },
+  notesInput: {
+    borderWidth: 1,
+    borderColor: Palette.borderStrong,
+    borderRadius: 10,
+    padding: 12,
+    minHeight: 80,
+    fontSize: 15,
+    color: Palette.text,
+    textAlignVertical: 'top',
+    marginBottom: 16,
   },
   saveButton: {
     backgroundColor: Palette.accent,

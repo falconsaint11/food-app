@@ -52,7 +52,9 @@ There are two separate kinds of rating:
 `restaurant_ratings` is a visit log: each row is one visit (`visited_at`), and
 `rating` is null when the user skipped the restaurant stars. How many rows a
 user has for a brand is how many times they've been there; the restaurant page
-shows "You've been here N times". Each row is for exactly one of
+shows "You've been here N times". A visit can also have `notes` about the
+restaurant itself (up to 2,000 characters); the latest 5 across the brand show
+on the restaurant page under "What people are saying". Each row is for exactly one of
 `restaurant_id` (a location) or `brand_id` (the whole restaurant). `brand_id` has no foreign key
 on purpose; see the comment in `20261027000000_brand_ratings.sql`.
 
@@ -70,6 +72,8 @@ Ways to rate:
   duplicate check ("Did you mean …?") when saving.
 - **Log tab with no dishes:** just the restaurant stars, saved for that
   location ("Save Restaurant Rating"). Tagging friends needs a dish.
+- **Restaurant notes:** a "What stood out about the restaurant?" box appears in
+  the Log tab once the restaurant is rated, and in the Rate pop-up.
 - **Restaurant page, ★ Rate:** a pop-up with only the stars and the user's
   history ("You've rated it 3 times · last 4★"). Each save adds a new
   brand-wide visit, so there's no location to pick.
@@ -174,7 +178,7 @@ their ranking numbers.
 
 ## Migrations
 
-Run in order in the Supabase SQL editor. All except `20261028000000_restaurant_visits.sql`
+Run in order in the Supabase SQL editor. All except `20261029000000_restaurant_visit_notes.sql`
 have already been run on the shared project.
 
 | File | What it does |
@@ -188,6 +192,7 @@ have already been run on the shared project.
 | `20261026000000_dish_tags.sql` | `tags` list, `dish_tag_votes`, tag guesses, public tags (2-vote rule), `top_dishes_by_tag()`, and `merge_dishes()` moving tag votes |
 | `20261027000000_brand_ratings.sql` | Brand-wide restaurant ratings: `restaurant_ratings.brand_id`, exactly one of location or brand per row |
 | `20261028000000_restaurant_visits.sql` | Turns `restaurant_ratings` into a visit log: no more one-per-user limit, optional `rating`, `visited_at` |
+| `20261029000000_restaurant_visit_notes.sql` | Optional `notes` on each visit (max 2,000 characters) |
 
 Don't add a foreign key from `dishes` to `reviews`. `reviews.dish_id` already
 links them, and a second link breaks every `reviews … dishes (…)` query.
