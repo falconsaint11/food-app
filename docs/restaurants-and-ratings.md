@@ -46,15 +46,19 @@ There are two separate kinds of rating:
 |---|---|---|
 | Table | `reviews` (via `dishes`) | `restaurant_ratings` |
 | Required when logging? | Only if a dish is entered | Only if no dish is entered |
-| How many per user | One per log | One per **location** (Log tab) and one per **brand** (Rate button); rating again replaces it |
+| How many per user | One per log | One per **visit**: every Log tab save adds one (stars optional), and so does each Rate button save |
 | Shown on | Dish rows, Top Items, the dish page | The restaurant page header |
 
-Each `restaurant_ratings` row is for exactly one of `restaurant_id` (a
-location) or `brand_id` (the whole restaurant). `brand_id` has no foreign key
+`restaurant_ratings` is a visit log: each row is one visit (`visited_at`), and
+`rating` is null when the user skipped the restaurant stars. How many rows a
+user has for a brand is how many times they've been there; the restaurant page
+shows "You've been here N times". Each row is for exactly one of
+`restaurant_id` (a location) or `brand_id` (the whole restaurant). `brand_id` has no foreign key
 on purpose; see the comment in `20261027000000_brand_ratings.sql`.
 
 The restaurant page header averages **each person's** ratings across the brand
-(location and brand-wide ratings) first, then averages those people. Someone who rated five McDonald's counts as
+(every visit with stars, location and brand-wide) first, then averages those
+people. Someone who rated five McDonald's counts as
 one vote. Dish reviews never count toward the restaurant rating; a restaurant
 nobody has rated shows "No ratings yet".
 
@@ -66,8 +70,9 @@ Ways to rate:
   duplicate check ("Did you mean …?") when saving.
 - **Log tab with no dishes:** just the restaurant stars, saved for that
   location ("Save Restaurant Rating"). Tagging friends needs a dish.
-- **Restaurant page, ★ Rate:** a pop-up with only the stars. It saves one
-  brand-wide rating, so there's no location to pick.
+- **Restaurant page, ★ Rate:** a pop-up with only the stars and the user's
+  history ("You've rated it 3 times · last 4★"). Each save adds a new
+  brand-wide visit, so there's no location to pick.
 - **Restaurant page, + Log a dish** and **dish page, ★ Rate this dish:** open
   the Log tab pre-filled through the `restaurantId` and `dishName` params,
   using the nearest location.
@@ -169,7 +174,7 @@ their ranking numbers.
 
 ## Migrations
 
-Run in order in the Supabase SQL editor. All except `20261027000000_brand_ratings.sql`
+Run in order in the Supabase SQL editor. All except `20261028000000_restaurant_visits.sql`
 have already been run on the shared project.
 
 | File | What it does |
@@ -182,6 +187,7 @@ have already been run on the shared project.
 | `20261025000001_drop_dish_cover_fk.sql` | Removes a foreign key that made `reviews → dishes` queries ambiguous (it broke the feed) |
 | `20261026000000_dish_tags.sql` | `tags` list, `dish_tag_votes`, tag guesses, public tags (2-vote rule), `top_dishes_by_tag()`, and `merge_dishes()` moving tag votes |
 | `20261027000000_brand_ratings.sql` | Brand-wide restaurant ratings: `restaurant_ratings.brand_id`, exactly one of location or brand per row |
+| `20261028000000_restaurant_visits.sql` | Turns `restaurant_ratings` into a visit log: no more one-per-user limit, optional `rating`, `visited_at` |
 
 Don't add a foreign key from `dishes` to `reviews`. `reviews.dish_id` already
 links them, and a second link breaks every `reviews … dishes (…)` query.

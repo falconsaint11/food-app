@@ -69,6 +69,7 @@ export default function RestaurantDetailScreen() {
   const [coverPhotos, setCoverPhotos] = useState<CoverPhoto[]>([]);
   const [restaurantRating, setRestaurantRating] = useState(0);
   const [ratingCount, setRatingCount] = useState(0);
+  const [myVisitCount, setMyVisitCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useFocusEffect(
@@ -107,8 +108,13 @@ export default function RestaurantDetailScreen() {
         restaurantRow.brand_id
       );
 
-      // Ratings of any of the brand's locations (from the Log tab) plus
-      // brand-wide ratings (from the Rate button).
+      // Visits to any of the brand's locations (from the Log tab) plus
+      // brand-wide ratings (from the Rate button). Each row is one visit;
+      // rating is null when the user skipped the restaurant stars.
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
       const ratingQuery = supabase
         .from('restaurant_ratings')
         .select('user_id, rating');
@@ -121,10 +127,16 @@ export default function RestaurantDetailScreen() {
 
       if (ratingError) throw new Error(ratingError.message);
 
+      setMyVisitCount(
+        (ratingData ?? []).filter((row) => row.user_id === user?.id).length
+      );
+
       // Average each person's ratings first so someone who rated five
-      // locations counts the same as someone who rated one.
+      // visits or locations counts the same as someone who rated one.
       const ratingsByUser = new Map<string, number[]>();
       for (const row of ratingData ?? []) {
+        if (row.rating === null) continue;
+
         ratingsByUser.set(row.user_id, [
           ...(ratingsByUser.get(row.user_id) ?? []),
           Number(row.rating),
@@ -351,6 +363,13 @@ export default function RestaurantDetailScreen() {
             <Text style={styles.title}>
               {restaurant.brands?.name ?? restaurant.name}
             </Text>
+
+            {myVisitCount > 0 ? (
+              <Text style={styles.visitCount}>
+                You’ve been here{' '}
+                {myVisitCount === 1 ? 'once' : `${myVisitCount} times`}
+              </Text>
+            ) : null}
           </View>
 
           <View style={styles.headerRating}>
@@ -498,6 +517,11 @@ const styles = StyleSheet.create({
     color: Palette.text,
     fontSize: 30,
     fontWeight: '700',
+  },
+  visitCount: {
+    color: Palette.textSecondary,
+    fontSize: 14,
+    marginTop: 6,
   },
   ratingNumber: {
     color: Palette.accent,

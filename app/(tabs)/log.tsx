@@ -860,18 +860,17 @@ export default function LogScreen() {
     return newDish.id as string;
   }
 
-  async function saveRestaurantRating(userId: string, restaurantId: string) {
-    const { error } = await supabase.from("restaurant_ratings").upsert(
-      {
-        user_id: userId,
-        restaurant_id: restaurantId,
-        rating: restaurantRating,
-      },
-      { onConflict: "user_id,restaurant_id" },
-    );
+  // Each save is one visit to this location, with the restaurant stars if
+  // given; the restaurant page counts visits and averages the stars.
+  async function recordVisit(userId: string, restaurantId: string) {
+    const { error } = await supabase.from("restaurant_ratings").insert({
+      user_id: userId,
+      restaurant_id: restaurantId,
+      rating: restaurantRating > 0 ? restaurantRating : null,
+    });
 
     if (error) {
-      console.log("Restaurant rating error:", error.message);
+      console.log("Visit error:", error.message);
     }
 
     return error?.message ?? null;
@@ -1050,13 +1049,17 @@ export default function LogScreen() {
         }
       }
 
-      if (restaurantRating > 0) {
-        const ratingError = await saveRestaurantRating(user.id, restaurantId);
+      // Skip the visit if every dish failed; retrying will record it.
+      const anythingSaved =
+        namedDishes.length === 0 || failedDishes.length < namedDishes.length;
 
-        if (ratingError) {
-          if (namedDishes.length === 0) throw new Error(ratingError);
+      if (anythingSaved) {
+        const visitError = await recordVisit(user.id, restaurantId);
 
-          failedExtras.add("the restaurant rating");
+        if (visitError) {
+          if (namedDishes.length === 0) throw new Error(visitError);
+
+          if (restaurantRating > 0) failedExtras.add("the restaurant rating");
         }
       }
 
@@ -1261,47 +1264,6 @@ export default function LogScreen() {
       .then(setAllTags)
       .catch((error) => console.log("Could not load tags:", error));
   }, []);
-
-  // Show the user's existing rating for this location; logging again updates it.
-  useEffect(() => {
-    if (!selectedRestaurantId) {
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadExistingRestaurantRating() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) return;
-
-      const { data, error } = await supabase
-        .from("restaurant_ratings")
-        .select("rating")
-        .eq("user_id", user.id)
-        .eq("restaurant_id", selectedRestaurantId)
-        .maybeSingle();
-
-      if (error) {
-        console.log("Restaurant rating lookup error:", error.message);
-        return;
-      }
-
-      if (!cancelled && data) {
-        setRestaurantRating((current) =>
-          current > 0 ? current : Number(data.rating),
-        );
-      }
-    }
-
-    loadExistingRestaurantRating();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedRestaurantId]);
 
   useFocusEffect(
     useCallback(() => {

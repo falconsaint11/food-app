@@ -14,6 +14,7 @@ import {
 
 import { StarRatingInput } from '@/components/star-rating-input';
 import { Palette } from '@/constants/theme';
+import { getBrandLocationIds } from '@/lib/brands';
 import { supabase } from '@/lib/supabase';
 
 type RateRestaurantButtonProps = {
@@ -24,9 +25,10 @@ type RateRestaurantButtonProps = {
   style?: StyleProp<ViewStyle>;
 };
 
-// Rates the restaurant as a whole: one brand-wide rating per user, with no
-// location to pick. (Logging in the Log tab rates the specific location.)
-// Restaurants without a brand fall back to rating that one location.
+// Rates the restaurant as a whole, with no location to pick. Each save is a
+// new visit, so people can rate a place again after every trip. (The Log tab
+// records visits to a specific location.) Restaurants without a brand fall
+// back to that one location.
 export function RateRestaurantButton({
   restaurantId,
   brandId,
@@ -38,6 +40,7 @@ export function RateRestaurantButton({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [rating, setRating] = useState(0);
+  const [pastRatings, setPastRatings] = useState<number[]>([]);
 
   async function openSheet() {
     setOpen(true);
@@ -50,18 +53,27 @@ export function RateRestaurantButton({
 
       if (!user) throw new Error('You must be signed in to rate.');
 
+      // The user's earlier ratings at any location of this brand, newest
+      // first, to show their history.
+      const locationIds = await getBrandLocationIds(restaurantId, brandId);
+
       const query = supabase
         .from('restaurant_ratings')
         .select('rating')
-        .eq('user_id', user.id);
+        .eq('user_id', user.id)
+        .not('rating', 'is', null)
+        .order('visited_at', { ascending: false });
 
       const { data, error } = brandId
-        ? await query.eq('brand_id', brandId).maybeSingle()
-        : await query.eq('restaurant_id', restaurantId).maybeSingle();
+        ? await query.or(
+            `restaurant_id.in.(${locationIds.join(',')}),brand_id.eq.${brandId}`
+          )
+        : await query.eq('restaurant_id', restaurantId);
 
       if (error) throw new Error(error.message);
 
-      setRating(data ? Number(data.rating) : 0);
+      setPastRatings((data ?? []).map((row) => Number(row.rating)));
+      setRating(0);
     } catch (error) {
       setOpen(false);
       Alert.alert(
@@ -87,19 +99,13 @@ export function RateRestaurantButton({
 
       if (!user) throw new Error('You must be signed in to rate.');
 
-      const { error } = brandId
-        ? await supabase
-            .from('restaurant_ratings')
-            .upsert(
-              { user_id: user.id, brand_id: brandId, rating },
-              { onConflict: 'user_id,brand_id' }
-            )
-        : await supabase
-            .from('restaurant_ratings')
-            .upsert(
-              { user_id: user.id, restaurant_id: restaurantId, rating },
-              { onConflict: 'user_id,restaurant_id' }
-            );
+      const { error } = await supabase
+        .from('restaurant_ratings')
+        .insert(
+          brandId
+            ? { user_id: user.id, brand_id: brandId, rating }
+            : { user_id: user.id, restaurant_id: restaurantId, rating }
+        );
 
       if (error) throw new Error(error.message);
 
@@ -133,6 +139,16 @@ export function RateRestaurantButton({
 
         <View style={styles.sheet}>
           <Text style={styles.sheetTitle}>Rate {restaurantName}</Text>
+
+          {!loading && pastRatings.length > 0 ? (
+            <Text style={styles.historyText}>
+              You’ve rated it{' '}
+              {pastRatings.length === 1
+                ? 'once'
+                : `${pastRatings.length} times`}{' '}
+              · last {pastRatings[0].toFixed(1)} ★
+            </Text>
+          ) : null}
 
           {loading ? (
             <ActivityIndicator style={styles.loading} />
@@ -191,6 +207,12 @@ const styles = StyleSheet.create({
     color: Palette.text,
     fontSize: 20,
     fontWeight: '700',
+    marginBottom: 16,
+  },
+  historyText: {
+    color: Palette.textSecondary,
+    fontSize: 14,
+    marginTop: -8,
     marginBottom: 16,
   },
   loading: {
