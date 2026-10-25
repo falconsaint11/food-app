@@ -330,10 +330,10 @@ export default function ProfileScreen() {
             <Text style={styles.editButtonText}>Edit Profile</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.signOutButton}
-            onPress={confirmSignOut}
+            style={styles.editButton}
+            onPress={() => router.push("/settings")}
           >
-            <Text style={styles.signOutText}>Sign Out</Text>
+            <Text style={styles.editButtonText}>⚙️ Settings</Text>
           </TouchableOpacity>
         </View>
       </View>

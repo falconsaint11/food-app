@@ -178,7 +178,7 @@ their ranking numbers.
 
 ## Migrations
 
-Run in order in the Supabase SQL editor. All except `20261029000000_restaurant_visit_notes.sql`
+Run in order in the Supabase SQL editor. All except `20261030000000_delete_my_account.sql`
 have already been run on the shared project.
 
 | File | What it does |
@@ -193,9 +193,30 @@ have already been run on the shared project.
 | `20261027000000_brand_ratings.sql` | Brand-wide restaurant ratings: `restaurant_ratings.brand_id`, exactly one of location or brand per row |
 | `20261028000000_restaurant_visits.sql` | Turns `restaurant_ratings` into a visit log: no more one-per-user limit, optional `rating`, `visited_at` |
 | `20261029000000_restaurant_visit_notes.sql` | Optional `notes` on each visit (max 2,000 characters) |
+| `20261030000000_delete_my_account.sql` | `delete_my_account()` and a storage rule letting users delete their own photo folders |
 
 Don't add a foreign key from `dishes` to `reviews`. `reviews.dish_id` already
 links them, and a second link breaks every `reviews … dishes (…)` query.
+
+## Settings and account deletion
+
+`app/settings.tsx` (⚙️ Settings on your profile, next to Edit Profile) has
+change email (Supabase emails a confirmation link), change password, Log Out,
+and Delete account.
+
+Deleting an account (type DELETE to confirm):
+1. Removes the user's photos from `review-photos` and `profile-photos`
+   (their `<user id>/` folders) through the Storage API, and stops if any
+   are left.
+2. Calls `delete_my_account()`, which deletes their reviews (with everyone's
+   comments, reactions and friend tags on them), their own comments,
+   reactions and tags elsewhere, lists and list items, rankings, visits, tag
+   votes, notification reads, follows both ways, profile, and login, in one
+   transaction. Restaurants and dishes they added stay.
+
+**If you add a table that points at users or reviews, add it to
+`delete_my_account()`.** Otherwise deleting an account fails with an error
+(nothing is deleted), which blocks App Store-required deletion.
 
 ## Known gaps
 
