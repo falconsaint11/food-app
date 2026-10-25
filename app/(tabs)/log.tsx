@@ -1,4 +1,3 @@
-import * as ImagePicker from "expo-image-picker";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 
 import * as Location from "expo-location";
@@ -8,21 +7,27 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 
+import {
+  createDishEntry,
+  DishEntry,
+  DishResult,
+  LogDishCard,
+} from "@/components/log-dish-card";
 import { StarRatingInput } from "@/components/star-rating-input";
 import { getBrandLocationIds } from "@/lib/brands";
 import { supabase } from "@/lib/supabase";
-import { fetchTags, guessDishTags, Tag } from "@/lib/tags";
+import { fetchTags, Tag } from "@/lib/tags";
 import { Palette } from "@/constants/theme";
 
 type RestaurantResult = {
@@ -41,14 +46,6 @@ type RestaurantResult = {
   address: string | null;
 
   google_place_id: string | null;
-};
-
-type DishResult = {
-  id: string;
-
-  name: string;
-
-  restaurant_id: string;
 };
 
 type DishMatch = DishResult & {
@@ -105,6 +102,64 @@ type TaggableFriend = {
   display_name: string | null;
 };
 
+function createSessionToken() {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
+    /[xy]/g,
+
+    (character) => {
+      const random = Math.floor(Math.random() * 16);
+
+      const value = character === "x" ? random : (random & 0x3) | 0x8;
+
+      return value.toString(16);
+    },
+  );
+}
+
+async function uploadPhoto(uri: string, userId: string) {
+  const uriParts = uri.split(".");
+
+  const rawExtension = uriParts[uriParts.length - 1]?.toLowerCase();
+
+  const extension =
+    rawExtension === "png" ? "png" : rawExtension === "webp" ? "webp" : "jpg";
+
+  const contentType =
+    extension === "png"
+      ? "image/png"
+      : extension === "webp"
+        ? "image/webp"
+        : "image/jpeg";
+
+  const filePath = `${userId}/${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}.${extension}`;
+
+  const response = await fetch(uri);
+
+  const arrayBuffer = await response.arrayBuffer();
+
+  const { error } = await supabase.storage
+    .from("review-photos")
+    .upload(filePath, arrayBuffer, {
+      contentType,
+
+      upsert: false,
+    });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return filePath;
+}
+
+function plural(count: number, word: string) {
+  return `${count} ${word}${count === 1 ? "" : "es"}`;
+}
+
+// Logs a visit: one restaurant, any number of dishes, an optional restaurant
+// rating, and the friends who came along.
 export default function LogScreen() {
   // Restaurant and dish pages can open this tab with these filled in.
   const prefill = useLocalSearchParams<{
@@ -130,6 +185,13 @@ export default function LogScreen() {
 
   const [googlePlaceId, setGooglePlaceId] = useState<string | null>(null);
 
+  // A restaurant Google doesn't know, added by name ("Can't find it?").
+  const [manualRestaurant, setManualRestaurant] = useState(false);
+
+  const [atManualRestaurant, setAtManualRestaurant] = useState(false);
+
+  const [gettingLocation, setGettingLocation] = useState(false);
+
   const [website, setWebsite] = useState<string | null>(null);
 
   const [address, setAddress] = useState("");
@@ -146,42 +208,22 @@ export default function LogScreen() {
 
   const [searchLongitude, setSearchLongitude] = useState<number | null>(null);
 
-  const [gettingLocation, setGettingLocation] = useState(false);
-
-  const [dishName, setDishName] = useState("");
-
-  const [dishResults, setDishResults] = useState<DishResult[]>([]);
-
-  const [selectedDishId, setSelectedDishId] = useState<string | null>(null);
-
-  // A suggestion can come from another location of the same brand.
-  const [selectedDishRestaurantId, setSelectedDishRestaurantId] = useState<
-    string | null
-  >(null);
-
   // Every saved location of the selected restaurant's brand, so dish
   // suggestions cover the whole chain's menu.
   const [menuLocationIds, setMenuLocationIds] = useState<string[]>([]);
 
-  const [rating, setRating] = useState(0);
+  const [dishes, setDishes] = useState<DishEntry[]>(() => [createDishEntry()]);
 
-  // Optional, separate from the dish rating. 0 means "not rated".
+  // Optional, separate from dish ratings. 0 means "not rated".
   const [restaurantRating, setRestaurantRating] = useState(0);
 
-  const [reviewText, setReviewText] = useState("");
   const [friends, setFriends] = useState<TaggableFriend[]>([]);
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
   const [friendSearch, setFriendSearch] = useState("");
   const [friendsLoading, setFriendsLoading] = useState(true);
+  const [showFriends, setShowFriends] = useState(false);
 
   const [allTags, setAllTags] = useState<Tag[]>([]);
-
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
-
-  // Once the user taps a tag, stop replacing their choice with name guesses.
-  const [tagsTouched, setTagsTouched] = useState(false);
-
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
 
@@ -189,24 +231,889 @@ export default function LogScreen() {
     null,
   );
 
-  const googleSessionToken = useRef(createSessionToken());
+  // Groups Google autocomplete + details calls into one billed session.
+  const googleSessionToken = useRef<string | null>(null);
 
-  function createSessionToken() {
-    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
-      /[xy]/g,
+  function getSessionToken() {
+    if (!googleSessionToken.current) {
+      googleSessionToken.current = createSessionToken();
+    }
 
-      (character) => {
-        const random = Math.floor(Math.random() * 16);
-
-        const value = character === "x" ? random : (random & 0x3) | 0x8;
-
-        return value.toString(16);
-      },
-    );
+    return googleSessionToken.current;
   }
 
   function resetGoogleSession() {
-    googleSessionToken.current = createSessionToken();
+    googleSessionToken.current = null;
+  }
+
+  const restaurantChosen =
+    Boolean(selectedRestaurantId || googlePlaceId) ||
+    (manualRestaurant && restaurantName.trim().length > 0);
+
+  const namedDishes = dishes.filter((dish) => dish.name.trim());
+
+  function updateDish(key: string, patch: Partial<DishEntry>) {
+    setDishes((current) =>
+      current.map((dish) => (dish.key === key ? { ...dish, ...patch } : dish)),
+    );
+  }
+
+  function removeDish(key: string) {
+    setDishes((current) => current.filter((dish) => dish.key !== key));
+  }
+
+  // A suggestion picked for one restaurant doesn't belong to another.
+  function clearDishMatches() {
+    setDishes((current) =>
+      current.map((dish) => ({ ...dish, matchedDish: null })),
+    );
+  }
+
+  async function loadMutualFollowers() {
+    setFriendsLoading(true);
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+      if (authError || !user) throw new Error("You must be signed in.");
+
+      const { data: following, error: followingError } = await supabase
+        .from("follows")
+        .select("following_id")
+        .eq("follower_id", user.id);
+      if (followingError) throw followingError;
+
+      const { data: followers, error: followersError } = await supabase
+        .from("follows")
+        .select("follower_id")
+        .eq("following_id", user.id);
+      if (followersError) throw followersError;
+
+      const followerIds = new Set(
+        (followers ?? []).map((row) => row.follower_id),
+      );
+      const mutualIds = (following ?? [])
+        .map((row) => row.following_id)
+        .filter((userId) => followerIds.has(userId));
+
+      if (mutualIds.length === 0) {
+        setFriends([]);
+        setSelectedFriends([]);
+        return;
+      }
+
+      const { data: profiles, error: profilesError } = await supabase
+        .from("profiles")
+        .select("id, username, display_name")
+        .in("id", mutualIds);
+      if (profilesError) throw profilesError;
+
+      const available = (profiles ?? []) as TaggableFriend[];
+      setFriends(available);
+      setSelectedFriends((current) =>
+        current.filter((id) => available.some((friend) => friend.id === id)),
+      );
+    } catch (error) {
+      console.log("Could not load mutual followers:", error);
+      Alert.alert("Friends error", "Could not load your mutual followers.");
+    } finally {
+      setFriendsLoading(false);
+    }
+  }
+
+  function toggleFriend(friendId: string) {
+    setSelectedFriends((current) =>
+      current.includes(friendId)
+        ? current.filter((id) => id !== friendId)
+        : [...current, friendId],
+    );
+  }
+
+  async function searchGooglePlaces(text: string) {
+    const trimmed = text.trim();
+
+    if (trimmed.length < 3) {
+      setGoogleResults([]);
+
+      setGoogleLoading(false);
+
+      return;
+    }
+
+    setGoogleLoading(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "google-places-autocomplete",
+
+        {
+          body: {
+            input: trimmed,
+
+            sessionToken: getSessionToken(),
+
+            latitude: searchLatitude,
+
+            longitude: searchLongitude,
+          },
+        },
+      );
+
+      if (error) {
+        console.log("Google autocomplete function error:", error.message);
+
+        setGoogleResults([]);
+
+        return;
+      }
+
+      const suggestions = Array.isArray(data?.suggestions)
+        ? data.suggestions
+        : [];
+
+      setGoogleResults(suggestions);
+    } catch (error) {
+      console.log("Google autocomplete error:", error);
+
+      setGoogleResults([]);
+    } finally {
+      setGoogleLoading(false);
+    }
+  }
+
+  function clearRestaurant() {
+    setSelectedRestaurantId(null);
+
+    setGooglePlaceId(null);
+
+    setManualRestaurant(false);
+
+    setAtManualRestaurant(false);
+
+    setWebsite(null);
+
+    setRestaurantRating(0);
+
+    setAddress("");
+
+    setCity("");
+
+    setState("");
+
+    setLatitude(null);
+
+    setLongitude(null);
+
+    clearDishMatches();
+  }
+
+  async function searchRestaurants(text: string) {
+    setRestaurantName(text);
+
+    clearRestaurant();
+
+    const trimmed = text.trim();
+
+    if (googleSearchTimeout.current) {
+      clearTimeout(googleSearchTimeout.current);
+    }
+
+    if (trimmed.length < 2) {
+      setRestaurantResults([]);
+
+      setGoogleResults([]);
+
+      setGoogleLoading(false);
+
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("restaurants")
+      .select(
+        "id, name, city, state, latitude, longitude, address, google_place_id",
+      )
+      .ilike("name", `%${trimmed}%`)
+      .limit(8);
+
+    if (error) {
+      console.log("Restaurant search error:", error.message);
+    } else {
+      setRestaurantResults((data ?? []) as RestaurantResult[]);
+    }
+
+    if (trimmed.length >= 3) {
+      setGoogleLoading(true);
+
+      googleSearchTimeout.current = setTimeout(() => {
+        searchGooglePlaces(trimmed);
+      }, 350);
+    } else {
+      setGoogleResults([]);
+
+      setGoogleLoading(false);
+    }
+  }
+
+  function selectRestaurant(restaurant: RestaurantResult) {
+    if (googleSearchTimeout.current) {
+      clearTimeout(googleSearchTimeout.current);
+    }
+
+    clearRestaurant();
+
+    setRestaurantName(restaurant.name);
+
+    setCity(restaurant.city ?? "");
+
+    setState(restaurant.state ?? "");
+
+    setAddress(restaurant.address ?? "");
+
+    setGooglePlaceId(restaurant.google_place_id ?? null);
+
+    setLatitude(
+      restaurant.latitude !== null ? Number(restaurant.latitude) : null,
+    );
+
+    setLongitude(
+      restaurant.longitude !== null ? Number(restaurant.longitude) : null,
+    );
+
+    setSelectedRestaurantId(restaurant.id);
+
+    setRestaurantResults([]);
+
+    setGoogleResults([]);
+
+    setGoogleLoading(false);
+  }
+
+  async function selectGoogleRestaurant(suggestion: GooglePlaceSuggestion) {
+    const placeId = suggestion.placePrediction?.placeId;
+
+    if (!placeId) {
+      Alert.alert(
+        "Google Places error",
+
+        "This restaurant result did not include a place ID.",
+      );
+
+      return;
+    }
+
+    if (googleSearchTimeout.current) {
+      clearTimeout(googleSearchTimeout.current);
+    }
+
+    setGoogleLoading(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "google-place-details",
+
+        {
+          body: {
+            placeId,
+
+            sessionToken: getSessionToken(),
+          },
+        },
+      );
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      const details = data as GooglePlaceDetails;
+
+      if (!details?.google_place_id || !details?.name) {
+        throw new Error("Google did not return complete place details.");
+      }
+
+      const { data: existingRestaurant, error: existingError } = await supabase
+        .from("restaurants")
+        .select(
+          "id, name, city, state, latitude, longitude, address, google_place_id",
+        )
+        .eq("google_place_id", details.google_place_id)
+        .maybeSingle();
+
+      if (existingError) {
+        throw new Error(existingError.message);
+      }
+
+      if (existingRestaurant) {
+        selectRestaurant(existingRestaurant as RestaurantResult);
+
+        resetGoogleSession();
+
+        return;
+      }
+
+      clearRestaurant();
+
+      setRestaurantName(details.name);
+
+      setGooglePlaceId(details.google_place_id);
+
+      setWebsite(details.website ?? null);
+
+      setAddress(details.address ?? "");
+
+      setCity(details.city ?? "");
+
+      setState(details.state ?? "");
+
+      setLatitude(details.latitude !== null ? Number(details.latitude) : null);
+
+      setLongitude(
+        details.longitude !== null ? Number(details.longitude) : null,
+      );
+
+      setRestaurantResults([]);
+
+      setGoogleResults([]);
+
+      resetGoogleSession();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not load this restaurant.";
+
+      Alert.alert("Google Places error", message);
+    } finally {
+      setGoogleLoading(false);
+    }
+  }
+
+  function addRestaurantByName() {
+    if (googleSearchTimeout.current) {
+      clearTimeout(googleSearchTimeout.current);
+    }
+
+    clearRestaurant();
+
+    setManualRestaurant(true);
+
+    setRestaurantResults([]);
+
+    setGoogleResults([]);
+
+    setGoogleLoading(false);
+  }
+
+  // For a restaurant added by name: save where the user is standing as its
+  // location, and fill in the city and state from it.
+  async function toggleAtManualRestaurant(value: boolean) {
+    if (!value) {
+      setAtManualRestaurant(false);
+
+      setLatitude(null);
+
+      setLongitude(null);
+
+      setCity("");
+
+      setState("");
+
+      return;
+    }
+
+    setGettingLocation(true);
+
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+
+      if (!permission.granted) {
+        Alert.alert(
+          "Location permission needed",
+          "Allow location access to save where this restaurant is.",
+        );
+
+        return;
+      }
+
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      setLatitude(position.coords.latitude);
+
+      setLongitude(position.coords.longitude);
+
+      const [place] = await Location.reverseGeocodeAsync(position.coords);
+
+      setCity(place?.city ?? "");
+
+      setState(place?.region ?? "");
+
+      setAtManualRestaurant(true);
+    } catch (error) {
+      Alert.alert(
+        "Location error",
+        error instanceof Error ? error.message : "Could not get your location.",
+      );
+    } finally {
+      setGettingLocation(false);
+    }
+  }
+
+  // Fuzzy search ("fry" finds "French Fries"), one result per dish name.
+  async function searchDishMatches(
+    locationIds: string[],
+    text: string,
+    limit = 8,
+  ) {
+    const { data, error } = await supabase.rpc("search_dishes", {
+      p_location_ids: locationIds,
+
+      p_query: text,
+
+      p_current_restaurant_id: selectedRestaurantId,
+
+      p_limit: limit,
+    });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return (data ?? []) as DishMatch[];
+  }
+
+  async function searchMenu(text: string): Promise<DishResult[]> {
+    if (menuLocationIds.length === 0) {
+      return [];
+    }
+
+    try {
+      return await searchDishMatches(menuLocationIds, text);
+    } catch (error) {
+      console.log("Dish search error:", error);
+      return [];
+    }
+  }
+
+  function askAboutSimilarDish(match: DishResult, typedName: string) {
+    return new Promise<"use" | "new" | "cancel">((resolve) => {
+      Alert.alert(
+        `Did you mean "${match.name}"?`,
+
+        `"${match.name}" is already on this restaurant's menu. Using it keeps all its ratings together.`,
+
+        [
+          { text: "Cancel", style: "cancel", onPress: () => resolve("cancel") },
+
+          { text: `Add "${typedName}"`, onPress: () => resolve("new") },
+
+          { text: `Use "${match.name}"`, onPress: () => resolve("use") },
+        ],
+
+        { cancelable: true, onDismiss: () => resolve("cancel") },
+      );
+    });
+  }
+
+  // Before creating a new dish, use an exact match ("Large Fries" -> "Fries")
+  // or ask about a close one ("Fry" -> "French Fries"). Returns undefined if
+  // the user cancels.
+  async function resolveDishMatch(
+    dish: DishEntry,
+  ): Promise<DishResult | null | undefined> {
+    if (dish.matchedDish || menuLocationIds.length === 0) {
+      return dish.matchedDish;
+    }
+
+    try {
+      const [best] = await searchDishMatches(
+        menuLocationIds,
+        dish.name.trim(),
+        1,
+      );
+
+      if (best?.is_exact) {
+        return best;
+      }
+
+      if (best && best.score >= SIMILAR_DISH_PROMPT_SCORE) {
+        const choice = await askAboutSimilarDish(best, dish.name.trim());
+
+        if (choice === "cancel") return undefined;
+
+        if (choice === "use") return best;
+      }
+    } catch (error) {
+      console.log("Similar dish check error:", error);
+    }
+
+    return null;
+  }
+
+  async function findOrCreateRestaurant() {
+    if (selectedRestaurantId) {
+      return selectedRestaurantId;
+    }
+
+    const trimmedName = restaurantName.trim();
+
+    if (googlePlaceId) {
+      const { data: googleMatch, error: googleMatchError } = await supabase
+        .from("restaurants")
+        .select("id")
+        .eq("google_place_id", googlePlaceId)
+        .maybeSingle();
+
+      if (googleMatchError) {
+        throw new Error(googleMatchError.message);
+      }
+
+      if (googleMatch) {
+        return googleMatch.id as string;
+      }
+    } else if (city.trim()) {
+      // A restaurant added by name: reuse one with the same name in the same
+      // city. Without a city we can't tell same-named places apart.
+      const { data: exactMatches, error: exactError } = await supabase
+        .from("restaurants")
+        .select("id")
+        .is("google_place_id", null)
+        .ilike("name", trimmedName)
+        .ilike("city", city.trim())
+        .ilike("state", state.trim())
+        .limit(1);
+
+      if (exactError) {
+        throw new Error(exactError.message);
+      }
+
+      if (exactMatches && exactMatches.length > 0) {
+        return exactMatches[0].id as string;
+      }
+    }
+
+    const { data: newRestaurant, error: insertError } = await supabase
+      .from("restaurants")
+      .insert({
+        name: trimmedName,
+
+        city: city.trim(),
+
+        state: state.trim(),
+
+        address: address.trim() || null,
+
+        latitude,
+
+        longitude,
+
+        google_place_id: googlePlaceId,
+
+        website,
+      })
+      .select("id")
+      .single();
+
+    if (insertError || !newRestaurant) {
+      throw new Error(insertError?.message || "Could not create restaurant.");
+    }
+
+    return newRestaurant.id as string;
+  }
+
+  async function findOrCreateDish(
+    restaurantId: string,
+    dishName: string,
+    match: DishResult | null,
+  ) {
+    // A dish matched at another location of the brand gets its own row here,
+    // so the review stays tied to the location the user actually visited.
+    if (match?.restaurant_id === restaurantId) {
+      return match.id;
+    }
+
+    // Reuse the brand's existing name so the dish groups across locations.
+    const name = match?.name ?? dishName;
+
+    const [existing] = await searchDishMatches([restaurantId], name, 1);
+
+    if (existing?.is_exact) {
+      return existing.id;
+    }
+
+    const { data: newDish, error: insertError } = await supabase
+      .from("dishes")
+      .insert({
+        restaurant_id: restaurantId,
+
+        name,
+      })
+      .select("id")
+      .single();
+
+    if (insertError || !newDish) {
+      throw new Error(insertError?.message || "Could not create dish.");
+    }
+
+    return newDish.id as string;
+  }
+
+  async function saveRestaurantRating(userId: string, restaurantId: string) {
+    const { error } = await supabase.from("restaurant_ratings").upsert(
+      {
+        user_id: userId,
+        restaurant_id: restaurantId,
+        rating: restaurantRating,
+      },
+      { onConflict: "user_id,restaurant_id" },
+    );
+
+    if (error) {
+      console.log("Restaurant rating error:", error.message);
+    }
+
+    return error?.message ?? null;
+  }
+
+  // Saves one dish review plus its friend tags and dish tag votes. Throws if
+  // the review itself fails; returns the extras that failed.
+  async function saveDish(
+    userId: string,
+    restaurantId: string,
+    dish: DishEntry,
+    match: DishResult | null,
+  ) {
+    const dishId = await findOrCreateDish(restaurantId, dish.name.trim(), match);
+
+    const photoPath = dish.photoUri
+      ? await uploadPhoto(dish.photoUri, userId)
+      : null;
+
+    const { data: createdReview, error: reviewError } = await supabase
+      .from("reviews")
+      .insert({
+        user_id: userId,
+        dish_id: dishId,
+        rating: dish.rating,
+        review_text: dish.notes.trim() || null,
+        photo_path: photoPath,
+      })
+      .select("id")
+      .single();
+
+    if (reviewError || !createdReview) {
+      if (photoPath) {
+        await supabase.storage.from("review-photos").remove([photoPath]);
+      }
+
+      throw new Error(reviewError?.message || "Could not save the review.");
+    }
+
+    const failedExtras: string[] = [];
+
+    if (selectedFriends.length > 0) {
+      const { error: tagsError } = await supabase.from("review_tags").insert(
+        selectedFriends.map((friendId) => ({
+          review_id: createdReview.id,
+          tagged_user_id: friendId,
+        })),
+      );
+      if (tagsError) {
+        console.log("Review tags error:", tagsError.message);
+        failedExtras.push("friend tags");
+      }
+    }
+
+    // A tag shows publicly once enough people vote for it, so each user's
+    // tags are votes; re-tagging the same dish is ignored.
+    if (dish.tags.length > 0) {
+      const { error: dishTagsError } = await supabase
+        .from("dish_tag_votes")
+        .upsert(
+          dish.tags.map((tag) => ({
+            user_id: userId,
+            dish_id: dishId,
+            tag,
+          })),
+          { onConflict: "user_id,dish_id,tag", ignoreDuplicates: true },
+        );
+      if (dishTagsError) {
+        console.log("Dish tags error:", dishTagsError.message);
+        failedExtras.push("dish tags");
+      }
+    }
+
+    return failedExtras;
+  }
+
+  async function logVisit() {
+    if (!restaurantChosen) {
+      Alert.alert(
+        "Pick a restaurant",
+        "Search for where you ate, then pick it from the list.",
+      );
+
+      return;
+    }
+
+    const unratedDish = namedDishes.find((dish) => dish.rating < 0.5);
+
+    if (unratedDish) {
+      Alert.alert(
+        "Missing rating",
+        `Give "${unratedDish.name.trim()}" a rating, or remove it.`,
+      );
+
+      return;
+    }
+
+    const unnamedDish = dishes.find(
+      (dish) =>
+        !dish.name.trim() && (dish.rating > 0 || dish.notes || dish.photoUri),
+    );
+
+    if (unnamedDish) {
+      Alert.alert("Missing dish name", "Name each dish you rated, or remove it.");
+
+      return;
+    }
+
+    // No dishes means the user is only rating the restaurant.
+    if (namedDishes.length === 0) {
+      if (restaurantRating < 0.5) {
+        Alert.alert(
+          "Nothing to log",
+          "Add a dish, or rate the restaurant to log just the restaurant.",
+        );
+
+        return;
+      }
+
+      if (selectedFriends.length > 0) {
+        Alert.alert(
+          "Add a dish",
+          "Friends are tagged on dish reviews. Add a dish, or clear your friends to just rate the restaurant.",
+        );
+
+        return;
+      }
+    }
+
+    const matches = new Map<string, DishResult | null>();
+
+    for (const dish of namedDishes) {
+      const match = await resolveDishMatch(dish);
+
+      if (match === undefined) {
+        return;
+      }
+
+      matches.set(dish.key, match);
+    }
+
+    setLoading(true);
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      setLoading(false);
+
+      Alert.alert("Error", "You must be signed in to log a visit.");
+
+      return;
+    }
+
+    try {
+      const restaurantId = await findOrCreateRestaurant();
+
+      const failedDishes: DishEntry[] = [];
+      const failedExtras = new Set<string>();
+
+      for (const dish of namedDishes) {
+        try {
+          const extras = await saveDish(
+            user.id,
+            restaurantId,
+            dish,
+            matches.get(dish.key) ?? null,
+          );
+
+          extras.forEach((extra) => failedExtras.add(extra));
+        } catch (error) {
+          console.log(`Could not save ${dish.name}:`, error);
+          failedDishes.push(dish);
+        }
+      }
+
+      if (restaurantRating > 0) {
+        const ratingError = await saveRestaurantRating(user.id, restaurantId);
+
+        if (ratingError) {
+          if (namedDishes.length === 0) throw new Error(ratingError);
+
+          failedExtras.add("the restaurant rating");
+        }
+      }
+
+      if (failedDishes.length > 0) {
+        // Keep only what didn't save so the user can retry it.
+        setDishes(failedDishes);
+
+        Alert.alert(
+          "Some dishes didn't save",
+          `${failedDishes.map((dish) => dish.name.trim()).join(", ")} couldn't be saved. They're still here so you can try again.`,
+        );
+
+        return;
+      }
+
+      const savedCount = namedDishes.length;
+
+      Alert.alert(
+        savedCount === 0 ? "Rated!" : "Logged!",
+        savedCount === 0
+          ? `Your rating for ${restaurantName.trim()} was saved.`
+          : failedExtras.size === 0
+            ? `${plural(savedCount, "dish")} from ${restaurantName.trim()} added to your diary.`
+            : `${plural(savedCount, "dish")} added to your diary, but ${[...failedExtras].join(" and ")} couldn't be saved.`,
+      );
+
+      resetForm();
+
+      router.navigate("/(tabs)");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Something went wrong.";
+
+      Alert.alert("Log error", message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function resetForm() {
+    setRestaurantName("");
+
+    setRestaurantResults([]);
+
+    setGoogleResults([]);
+
+    clearRestaurant();
+
+    setDishes([createDishEntry()]);
+
+    setSelectedFriends([]);
+
+    setFriendSearch("");
+
+    setShowFriends(false);
+
+    resetGoogleSession();
   }
 
   useEffect(() => {
@@ -333,9 +1240,7 @@ export default function LogScreen() {
       } else {
         selectRestaurant(data as RestaurantResult);
 
-        if (prefillDishName) {
-          setDishName(prefillDishName);
-        }
+        setDishes([createDishEntry(prefillDishName ?? "")]);
       }
 
       // Clear so reopening the tab later starts fresh.
@@ -347,6 +1252,8 @@ export default function LogScreen() {
     return () => {
       cancelled = true;
     };
+    // selectRestaurant only sets state; rerun only when new params arrive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill.restaurantId, prefill.dishName]);
 
   useEffect(() => {
@@ -354,41 +1261,6 @@ export default function LogScreen() {
       .then(setAllTags)
       .catch((error) => console.log("Could not load tags:", error));
   }, []);
-
-  // Pre-select tags from the dish name ("Cheeseburger" -> Burger).
-  useEffect(() => {
-    const trimmed = dishName.trim();
-
-    if (trimmed.length < 2 || tagsTouched) {
-      return;
-    }
-
-    let cancelled = false;
-
-    const timeout = setTimeout(async () => {
-      const guesses = await guessDishTags(trimmed);
-
-      if (!cancelled) setSelectedTags(guesses);
-    }, 400);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timeout);
-    };
-  }, [dishName, tagsTouched]);
-
-  // Leftover picks don't count once the dish name is cleared.
-  const activeTags = dishName.trim().length >= 2 ? selectedTags : [];
-
-  function toggleTag(slug: string) {
-    setTagsTouched(true);
-
-    setSelectedTags((current) =>
-      current.includes(slug)
-        ? current.filter((tag) => tag !== slug)
-        : [...current, slug],
-    );
-  }
 
   // Show the user's existing rating for this location; logging again updates it.
   useEffect(() => {
@@ -437,1029 +1309,19 @@ export default function LogScreen() {
     }, []),
   );
 
-  async function loadMutualFollowers() {
-    setFriendsLoading(true);
-    try {
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
-      if (authError || !user) throw new Error("You must be signed in.");
-
-      const { data: following, error: followingError } = await supabase
-        .from("follows")
-        .select("following_id")
-        .eq("follower_id", user.id);
-      if (followingError) throw followingError;
-
-      const { data: followers, error: followersError } = await supabase
-        .from("follows")
-        .select("follower_id")
-        .eq("following_id", user.id);
-      if (followersError) throw followersError;
-
-      const followerIds = new Set(
-        (followers ?? []).map((row) => row.follower_id),
-      );
-      const mutualIds = (following ?? [])
-        .map((row) => row.following_id)
-        .filter((userId) => followerIds.has(userId));
-
-      if (mutualIds.length === 0) {
-        setFriends([]);
-        setSelectedFriends([]);
-        return;
-      }
-
-      const { data: profiles, error: profilesError } = await supabase
-        .from("profiles")
-        .select("id, username, display_name")
-        .in("id", mutualIds);
-      if (profilesError) throw profilesError;
-
-      const available = (profiles ?? []) as TaggableFriend[];
-      setFriends(available);
-      setSelectedFriends((current) =>
-        current.filter((id) => available.some((friend) => friend.id === id)),
-      );
-    } catch (error) {
-      console.log("Could not load mutual followers:", error);
-      Alert.alert("Friends error", "Could not load your mutual followers.");
-    } finally {
-      setFriendsLoading(false);
-    }
-  }
-
-  function toggleFriend(friendId: string) {
-    setSelectedFriends((current) =>
-      current.includes(friendId)
-        ? current.filter((id) => id !== friendId)
-        : [...current, friendId],
-    );
-  }
-
-  async function searchGooglePlaces(text: string) {
-    const trimmed = text.trim();
-
-    if (trimmed.length < 3) {
-      setGoogleResults([]);
-
-      setGoogleLoading(false);
-
-      return;
-    }
-
-    setGoogleLoading(true);
-
-    try {
-      const { data, error } = await supabase.functions.invoke(
-        "google-places-autocomplete",
-
-        {
-          body: {
-            input: trimmed,
-
-            sessionToken: googleSessionToken.current,
-
-            latitude: searchLatitude,
-
-            longitude: searchLongitude,
-          },
-        },
-      );
-
-      if (error) {
-        console.log("Google autocomplete function error:", error.message);
-
-        setGoogleResults([]);
-
-        return;
-      }
-
-      const suggestions = Array.isArray(data?.suggestions)
-        ? data.suggestions
-        : [];
-
-      setGoogleResults(suggestions);
-    } catch (error) {
-      console.log("Google autocomplete error:", error);
-
-      setGoogleResults([]);
-    } finally {
-      setGoogleLoading(false);
-    }
-  }
-
-  async function searchRestaurants(text: string) {
-    setRestaurantName(text);
-
-    setSelectedRestaurantId(null);
-
-    setGooglePlaceId(null);
-
-    setWebsite(null);
-
-    setRestaurantRating(0);
-
-    setTagsTouched(false);
-
-    setAddress("");
-
-    setCity("");
-
-    setState("");
-
-    setLatitude(null);
-
-    setLongitude(null);
-
-    setDishName("");
-
-    setSelectedDishId(null);
-
-    setDishResults([]);
-
-    const trimmed = text.trim();
-
-    if (googleSearchTimeout.current) {
-      clearTimeout(googleSearchTimeout.current);
-    }
-
-    if (trimmed.length < 2) {
-      setRestaurantResults([]);
-
-      setGoogleResults([]);
-
-      setGoogleLoading(false);
-
-      return;
-    }
-
-    const { data, error } = await supabase
-
-      .from("restaurants")
-
-      .select(
-        `
-
-        id,
-
-        name,
-
-        city,
-
-        state,
-
-        latitude,
-
-        longitude,
-
-        address,
-
-        google_place_id
-
-      `,
-      )
-
-      .ilike("name", `%${trimmed}%`)
-
-      .limit(8);
-
-    if (error) {
-      console.log("Restaurant search error:", error.message);
-    } else {
-      setRestaurantResults((data ?? []) as RestaurantResult[]);
-    }
-
-    if (trimmed.length >= 3) {
-      setGoogleLoading(true);
-
-      googleSearchTimeout.current = setTimeout(() => {
-        searchGooglePlaces(trimmed);
-      }, 350);
-    } else {
-      setGoogleResults([]);
-
-      setGoogleLoading(false);
-    }
-  }
-
-  function selectRestaurant(restaurant: RestaurantResult) {
-    if (googleSearchTimeout.current) {
-      clearTimeout(googleSearchTimeout.current);
-    }
-
-    setRestaurantName(restaurant.name);
-
-    setCity(restaurant.city ?? "");
-
-    setState(restaurant.state ?? "");
-
-    setAddress(restaurant.address ?? "");
-
-    setGooglePlaceId(restaurant.google_place_id ?? null);
-
-    setLatitude(
-      restaurant.latitude !== null ? Number(restaurant.latitude) : null,
-    );
-
-    setLongitude(
-      restaurant.longitude !== null ? Number(restaurant.longitude) : null,
-    );
-
-    setSelectedRestaurantId(restaurant.id);
-
-    setRestaurantResults([]);
-
-    setGoogleResults([]);
-
-    setGoogleLoading(false);
-
-    setDishName("");
-
-    setSelectedDishId(null);
-
-    setDishResults([]);
-  }
-
-  async function selectGoogleRestaurant(suggestion: GooglePlaceSuggestion) {
-    const placeId = suggestion.placePrediction?.placeId;
-
-    if (!placeId) {
-      Alert.alert(
-        "Google Places error",
-
-        "This restaurant result did not include a place ID.",
-      );
-
-      return;
-    }
-
-    if (googleSearchTimeout.current) {
-      clearTimeout(googleSearchTimeout.current);
-    }
-
-    setGoogleLoading(true);
-
-    try {
-      const { data, error } = await supabase.functions.invoke(
-        "google-place-details",
-
-        {
-          body: {
-            placeId,
-
-            sessionToken: googleSessionToken.current,
-          },
-        },
-      );
-
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      const details = data as GooglePlaceDetails;
-
-      if (!details?.google_place_id || !details?.name) {
-        throw new Error("Google did not return complete place details.");
-      }
-
-      const { data: existingRestaurant, error: existingError } = await supabase
-
-        .from("restaurants")
-
-        .select(
-          `
-
-            id,
-
-            name,
-
-            city,
-
-            state,
-
-            latitude,
-
-            longitude,
-
-            address,
-
-            google_place_id
-
-          `,
-        )
-
-        .eq("google_place_id", details.google_place_id)
-
-        .maybeSingle();
-
-      if (existingError) {
-        throw new Error(existingError.message);
-      }
-
-      if (existingRestaurant) {
-        selectRestaurant(existingRestaurant as RestaurantResult);
-
-        resetGoogleSession();
-
-        return;
-      }
-
-      setRestaurantName(details.name);
-
-      setGooglePlaceId(details.google_place_id);
-
-      setWebsite(details.website ?? null);
-
-      setAddress(details.address ?? "");
-
-      setCity(details.city ?? "");
-
-      setState(details.state ?? "");
-
-      setLatitude(details.latitude !== null ? Number(details.latitude) : null);
-
-      setLongitude(
-        details.longitude !== null ? Number(details.longitude) : null,
-      );
-
-      setSelectedRestaurantId(null);
-
-      setRestaurantResults([]);
-
-      setGoogleResults([]);
-
-      setDishName("");
-
-      setSelectedDishId(null);
-
-      setDishResults([]);
-
-      resetGoogleSession();
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Could not load this restaurant.";
-
-      Alert.alert("Google Places error", message);
-    } finally {
-      setGoogleLoading(false);
-    }
-  }
-
-  async function useCurrentLocation() {
-    if (selectedRestaurantId) {
-      Alert.alert(
-        "Existing restaurant",
-
-        "Location is already tied to this restaurant record.",
-      );
-
-      return;
-    }
-
-    Alert.alert(
-      "Use current location?",
-
-      "Only use this if you are currently at the restaurant.",
-
-      [
-        {
-          text: "Cancel",
-
-          style: "cancel",
-        },
-
-        {
-          text: "Use Location",
-
-          onPress: getCurrentLocation,
-        },
-      ],
-    );
-  }
-
-  async function getCurrentLocation() {
-    setGettingLocation(true);
-
-    try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-
-      if (!permission.granted) {
-        Alert.alert(
-          "Location permission needed",
-
-          "Allow location access if you want to save this restaurant's location.",
-        );
-
-        return;
-      }
-
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-
-      setLatitude(location.coords.latitude);
-
-      setLongitude(location.coords.longitude);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Could not get your location.";
-
-      Alert.alert("Location error", message);
-    } finally {
-      setGettingLocation(false);
-    }
-  }
-
-  function removeLocation() {
-    setLatitude(null);
-
-    setLongitude(null);
-  }
-
-  async function searchDishes(text: string) {
-    setDishName(text);
-
-    setSelectedDishId(null);
-
-    const trimmed = text.trim();
-
-    if (trimmed.length < 2) {
-      setDishResults([]);
-
-      // Clearing the dish starts tagging over.
-      setTagsTouched(false);
-
-      return;
-    }
-
-    if (menuLocationIds.length === 0) {
-      setDishResults([]);
-
-      return;
-    }
-
-    try {
-      setDishResults(await searchDishMatches(menuLocationIds, trimmed));
-    } catch (error) {
-      console.log("Dish search error:", error);
-    }
-  }
-
-  // Fuzzy search ("fry" finds "French Fries"), one result per dish name.
-  async function searchDishMatches(
-    locationIds: string[],
-    text: string,
-    limit = 8,
-  ) {
-    const { data, error } = await supabase.rpc("search_dishes", {
-      p_location_ids: locationIds,
-
-      p_query: text,
-
-      p_current_restaurant_id: selectedRestaurantId,
-
-      p_limit: limit,
-    });
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    return (data ?? []) as DishMatch[];
-  }
-
-  function askAboutSimilarDish(match: DishResult, typedName: string) {
-    return new Promise<"use" | "new" | "cancel">((resolve) => {
-      Alert.alert(
-        `Did you mean "${match.name}"?`,
-
-        `"${match.name}" is already on this restaurant's menu. Using it keeps all its ratings together.`,
-
-        [
-          { text: "Cancel", style: "cancel", onPress: () => resolve("cancel") },
-
-          { text: `Add "${typedName}"`, onPress: () => resolve("new") },
-
-          { text: `Use "${match.name}"`, onPress: () => resolve("use") },
-        ],
-
-        { cancelable: true, onDismiss: () => resolve("cancel") },
-      );
-    });
-  }
-
-  function selectDish(dish: DishResult) {
-    setDishName(dish.name);
-
-    setSelectedDishId(dish.id);
-
-    setSelectedDishRestaurantId(dish.restaurant_id);
-
-    setDishResults([]);
-  }
-
-  async function pickPhoto() {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-    if (!permission.granted) {
-      Alert.alert(
-        "Photo permission needed",
-
-        "Allow photo access to add a photo to your review.",
-      );
-
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-
-      allowsEditing: true,
-
-      aspect: [4, 3],
-
-      quality: 0.8,
-    });
-
-    if (result.canceled) {
-      return;
-    }
-
-    setPhotoUri(result.assets[0].uri);
-  }
-
-  async function uploadPhoto(uri: string, userId: string) {
-    const uriParts = uri.split(".");
-
-    const rawExtension = uriParts[uriParts.length - 1]?.toLowerCase();
-
-    const extension =
-      rawExtension === "png" ? "png" : rawExtension === "webp" ? "webp" : "jpg";
-
-    const contentType =
-      extension === "png"
-        ? "image/png"
-        : extension === "webp"
-          ? "image/webp"
-          : "image/jpeg";
-
-    const filePath = `${userId}/${Date.now()}-${Math.random()
-
-      .toString(36)
-
-      .slice(2)}.${extension}`;
-
-    const response = await fetch(uri);
-
-    const arrayBuffer = await response.arrayBuffer();
-
-    const { error } = await supabase.storage
-
-      .from("review-photos")
-
-      .upload(filePath, arrayBuffer, {
-        contentType,
-
-        upsert: false,
-      });
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    return filePath;
-  }
-
-  async function findOrCreateRestaurant() {
-    if (selectedRestaurantId) {
-      return selectedRestaurantId;
-    }
-
-    const trimmedName = restaurantName.trim();
-
-    const trimmedCity = city.trim();
-
-    const trimmedState = state.trim();
-
-    const trimmedAddress = address.trim();
-
-    if (googlePlaceId) {
-      const { data: googleMatch, error: googleMatchError } = await supabase
-
-        .from("restaurants")
-
-        .select("id")
-
-        .eq("google_place_id", googlePlaceId)
-
-        .maybeSingle();
-
-      if (googleMatchError) {
-        throw new Error(googleMatchError.message);
-      }
-
-      if (googleMatch) {
-        return googleMatch.id;
-      }
-    }
-
-    let exactQuery = supabase
-
-      .from("restaurants")
-
-      .select("id, name, city, state")
-
-      .ilike("name", trimmedName);
-
-    exactQuery = exactQuery.ilike("city", trimmedCity);
-
-    exactQuery = exactQuery.ilike("state", trimmedState);
-
-    const { data: exactMatches, error: exactError } = await exactQuery.limit(1);
-
-    if (exactError) {
-      throw new Error(exactError.message);
-    }
-
-    if (exactMatches && exactMatches.length > 0) {
-      return exactMatches[0].id;
-    }
-
-    const { data: newRestaurant, error: insertError } = await supabase
-
-      .from("restaurants")
-
-      .insert({
-        name: trimmedName,
-
-        city: trimmedCity,
-
-        state: trimmedState,
-
-        address: trimmedAddress || null,
-
-        latitude,
-
-        longitude,
-
-        google_place_id: googlePlaceId,
-
-        website,
-      })
-
-      .select("id")
-
-      .single();
-
-    if (insertError || !newRestaurant) {
-      throw new Error(insertError?.message || "Could not create restaurant.");
-    }
-
-    return newRestaurant.id;
-  }
-
-  async function findOrCreateDish(
-    restaurantId: string,
-    match: DishResult | null,
-  ) {
-    // A dish matched at another location of the brand gets its own row here,
-    // so the review stays tied to the location the user actually visited.
-    if (match?.restaurant_id === restaurantId) {
-      return match.id;
-    }
-
-    // Reuse the brand's existing name so the dish groups across locations.
-    const trimmedDishName = match?.name ?? dishName.trim();
-
-    const [existing] = await searchDishMatches(
-      [restaurantId],
-      trimmedDishName,
-      1,
-    );
-
-    if (existing?.is_exact) {
-      return existing.id;
-    }
-
-    const { data: newDish, error: insertError } = await supabase
-
-      .from("dishes")
-
-      .insert({
-        restaurant_id: restaurantId,
-
-        name: trimmedDishName,
-      })
-
-      .select("id")
-
-      .single();
-
-    if (insertError || !newDish) {
-      throw new Error(insertError?.message || "Could not create dish.");
-    }
-
-    return newDish.id;
-  }
-
-  async function logDish() {
-    if (!restaurantName.trim()) {
-      Alert.alert("Missing restaurant", "Enter a restaurant name.");
-
-      return;
-    }
-
-    if (!selectedRestaurantId && !city.trim()) {
-      Alert.alert("Missing city", "Enter the city for this new restaurant.");
-
-      return;
-    }
-
-    if (!selectedRestaurantId && !state.trim()) {
-      Alert.alert("Missing state", "Enter the state for this new restaurant.");
-
-      return;
-    }
-
-    // No dish means the user is only rating the restaurant.
-    const hasDish = dishName.trim().length > 0;
-
-    if (!hasDish) {
-      if (restaurantRating < 0.5) {
-        Alert.alert(
-          "Nothing to log",
-          "Add a dish, or rate the restaurant to log just the restaurant.",
-        );
-
-        return;
-      }
-
-      if (reviewText.trim() || photoUri || selectedFriends.length > 0) {
-        Alert.alert(
-          "Add a dish",
-          "Notes, photos and friends are saved with a dish. Add a dish, or clear them to just rate the restaurant.",
-        );
-
-        return;
-      }
-    } else if (rating < 0.5 || rating > 5) {
-      Alert.alert("Missing rating", "Choose a rating before logging the dish.");
-
-      return;
-    }
-
-    let matchedDish: DishResult | null =
-      selectedDishId && selectedDishRestaurantId
-        ? {
-            id: selectedDishId,
-            name: dishName.trim(),
-            restaurant_id: selectedDishRestaurantId,
-          }
-        : null;
-
-    // Before creating a new dish, use an exact match ("Large Fries" -> "Fries")
-    // or ask about a close one ("Fry" -> "French Fries").
-    if (hasDish && !matchedDish && menuLocationIds.length > 0) {
-      try {
-        const [best] = await searchDishMatches(
-          menuLocationIds,
-          dishName.trim(),
-          1,
-        );
-
-        if (best?.is_exact) {
-          matchedDish = best;
-        } else if (best && best.score >= SIMILAR_DISH_PROMPT_SCORE) {
-          const choice = await askAboutSimilarDish(best, dishName.trim());
-
-          if (choice === "cancel") {
-            return;
-          }
-
-          if (choice === "use") {
-            matchedDish = best;
-          }
-        }
-      } catch (error) {
-        console.log("Similar dish check error:", error);
-      }
-    }
-
-    setLoading(true);
-
-    const {
-      data: { user },
-
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
-      setLoading(false);
-
-      Alert.alert("Error", "You must be signed in to log a dish.");
-
-      return;
-    }
-
-    try {
-      const restaurantId = await findOrCreateRestaurant();
-
-      if (!hasDish) {
-        const ratingError = await saveRestaurantRating(user.id, restaurantId);
-
-        if (ratingError) {
-          throw new Error(ratingError);
-        }
-
-        Alert.alert(
-          "Rated!",
-          `Your rating for ${restaurantName.trim()} was saved.`,
-        );
-      } else {
-        await saveDishLog(user.id, restaurantId, matchedDish);
-      }
-
-      resetForm();
-
-      router.navigate("/(tabs)");
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Something went wrong.";
-
-      Alert.alert("Log error", message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function saveRestaurantRating(userId: string, restaurantId: string) {
-    const { error } = await supabase.from("restaurant_ratings").upsert(
-      {
-        user_id: userId,
-        restaurant_id: restaurantId,
-        rating: restaurantRating,
-      },
-      { onConflict: "user_id,restaurant_id" },
-    );
-
-    if (error) {
-      console.log("Restaurant rating error:", error.message);
-    }
-
-    return error?.message ?? null;
-  }
-
-  async function saveDishLog(
-    userId: string,
-    restaurantId: string,
-    matchedDish: DishResult | null,
-  ) {
-    let uploadedPhotoPath: string | null = null;
-
-    const dishId = await findOrCreateDish(restaurantId, matchedDish);
-
-    if (photoUri) {
-      uploadedPhotoPath = await uploadPhoto(photoUri, userId);
-    }
-
-    const { data: createdReview, error: reviewError } = await supabase
-      .from("reviews")
-      .insert({
-        user_id: userId,
-        dish_id: dishId,
-        rating,
-        review_text: reviewText.trim() || null,
-        photo_path: uploadedPhotoPath,
-      })
-      .select("id")
-      .single();
-
-    if (reviewError) {
-      if (uploadedPhotoPath) {
-        await supabase.storage
-
-          .from("review-photos")
-
-          .remove([uploadedPhotoPath]);
-      }
-
-      throw new Error(reviewError.message);
-    }
-
-    if (!createdReview) {
-      throw new Error("Review was saved but its ID was not returned.");
-    }
-
-    // Review creation and tag creation are separate requests. If tagging fails,
-    // keep the successfully created review and tell the user what happened.
-    let tagsSaved = true;
-    if (selectedFriends.length > 0) {
-      const { error: tagsError } = await supabase.from("review_tags").insert(
-        selectedFriends.map((friendId) => ({
-          review_id: createdReview.id,
-          tagged_user_id: friendId,
-        })),
-      );
-      if (tagsError) {
-        console.log("Review tags error:", tagsError.message);
-        tagsSaved = false;
-      }
-    }
-
-    let restaurantRatingSaved = true;
-    if (restaurantRating > 0) {
-      restaurantRatingSaved =
-        (await saveRestaurantRating(userId, restaurantId)) === null;
-    }
-
-    // A tag shows publicly once enough people vote for it, so each user's
-    // tags are votes; re-tagging the same dish is ignored.
-    let dishTagsSaved = true;
-    if (activeTags.length > 0) {
-      const { error: dishTagsError } = await supabase
-        .from("dish_tag_votes")
-        .upsert(
-          activeTags.map((tag) => ({
-            user_id: userId,
-            dish_id: dishId,
-            tag,
-          })),
-          { onConflict: "user_id,dish_id,tag", ignoreDuplicates: true },
-        );
-      if (dishTagsError) {
-        console.log("Dish tags error:", dishTagsError.message);
-        dishTagsSaved = false;
-      }
-    }
-
-    const failedExtras = [
-      !tagsSaved && "the friend tags",
-      !restaurantRatingSaved && "the restaurant rating",
-      !dishTagsSaved && "the dish tags",
-    ].filter(Boolean);
-
-    Alert.alert(
-      failedExtras.length === 0 ? "Logged!" : "Logged, with a problem",
-      failedExtras.length === 0
-        ? `${dishName.trim()} was added to your diary.`
-        : `${dishName.trim()} was added to your diary, but ${failedExtras.join(" and ")} could not be saved.`,
-    );
-  }
-
-  function resetForm() {
-    setRestaurantName("");
-
-    setRestaurantResults([]);
-
-    setGoogleResults([]);
-
-    setSelectedRestaurantId(null);
-
-    setGooglePlaceId(null);
-
-    setWebsite(null);
-
-    setAddress("");
-
-    setCity("");
-
-    setState("");
-
-    setLatitude(null);
-
-    setLongitude(null);
-
-    setDishName("");
-
-    setDishResults([]);
-
-    setSelectedDishId(null);
-
-    setRating(0);
-
-    setRestaurantRating(0);
-
-    setReviewText("");
-
-    setPhotoUri(null);
-    setSelectedFriends([]);
-    setFriendSearch("");
-    setSelectedTags([]);
-    setTagsTouched(false);
-
-    resetGoogleSession();
-  }
-
-  const creatingNewRestaurant =
-    restaurantName.trim().length >= 2 && !selectedRestaurantId;
-
-  const creatingNewDish = dishName.trim().length >= 2 && !selectedDishId;
-
-  const hasCoordinates = latitude !== null && longitude !== null;
+  const showRestaurantSearch = !restaurantChosen;
+
+  const restaurantSubtitle = manualRestaurant
+    ? atManualRestaurant
+      ? [city, state].filter(Boolean).join(", ") || "Added by you"
+      : "Added by you"
+    : address || [city, state].filter(Boolean).join(", ");
+
+  const visibleFriends = friends.filter((friend) =>
+    `${friend.username} ${friend.display_name ?? ""}`
+      .toLowerCase()
+      .includes(friendSearch.trim().toLowerCase()),
+  );
 
   return (
     <KeyboardAvoidingView
@@ -1470,362 +1332,173 @@ export default function LogScreen() {
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>Log Food</Text>
+        <Text style={styles.title}>Log a Visit</Text>
 
-        <Text style={styles.subtitle}>Rate a specific menu item you ate.</Text>
-
-        <Text style={styles.label}>Restaurant</Text>
-
-        <TextInput
-          style={styles.input}
-          placeholder="Search restaurant"
-          placeholderTextColor={Palette.textMuted}
-          value={restaurantName}
-          onChangeText={searchRestaurants}
-        />
-
-        {restaurantResults.length > 0 ? (
-          <View style={styles.resultsBox}>
-            <Text style={styles.resultsLabel}>Already on Food App</Text>
-
-            {restaurantResults.map((restaurant) => {
-              const locationText =
-                restaurant.address ||
-                [restaurant.city, restaurant.state].filter(Boolean).join(", ");
-
-              return (
-                <TouchableOpacity
-                  key={restaurant.id}
-                  style={styles.resultItem}
-                  onPress={() => selectRestaurant(restaurant)}
-                >
-                  <Text style={styles.resultName}>{restaurant.name}</Text>
-
-                  {locationText ? (
-                    <Text style={styles.resultSubtext}>{locationText}</Text>
-                  ) : null}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ) : null}
-
-        {googleLoading ? (
-          <View style={styles.googleLoadingRow}>
-            <ActivityIndicator size="small" />
-
-            <Text style={styles.googleLoadingText}>
-              Searching Google Places...
-            </Text>
-          </View>
-        ) : null}
-
-        {googleResults.length > 0 && !selectedRestaurantId ? (
-          <View style={styles.resultsBox}>
-            <Text style={styles.resultsLabel}>Google Places</Text>
-
-            {googleResults.map((suggestion, index) => {
-              const prediction = suggestion.placePrediction;
-
-              const placeId = prediction?.placeId ?? `google-${index}`;
-
-              const mainText =
-                prediction?.structuredFormat?.mainText?.text ??
-                prediction?.text?.text ??
-                "Restaurant";
-
-              const secondaryText =
-                prediction?.structuredFormat?.secondaryText?.text ?? "";
-
-              return (
-                <TouchableOpacity
-                  key={placeId}
-                  style={styles.resultItem}
-                  onPress={() => selectGoogleRestaurant(suggestion)}
-                >
-                  <Text style={styles.resultName}>{mainText}</Text>
-
-                  {secondaryText ? (
-                    <Text style={styles.resultSubtext}>{secondaryText}</Text>
-                  ) : null}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ) : null}
-
-        {selectedRestaurantId ? (
-          <View style={styles.selectedBox}>
-            <Text style={styles.selectedTitle}>
-              ✓ Existing restaurant selected
-            </Text>
-
-            <Text style={styles.selectedText}>{restaurantName}</Text>
-
-            {address ? (
-              <Text style={styles.selectedLocation}>{address}</Text>
-            ) : city || state ? (
-              <Text style={styles.selectedLocation}>
-                {[city, state].filter(Boolean).join(", ")}
-              </Text>
-            ) : null}
-          </View>
-        ) : googlePlaceId ? (
-          <View style={styles.googleSelectedBox}>
-            <Text style={styles.selectedTitle}>
-              ✓ Google restaurant selected
-            </Text>
-
-            <Text style={styles.selectedText}>{restaurantName}</Text>
-
-            {address ? (
-              <Text style={styles.selectedLocation}>{address}</Text>
-            ) : null}
-
-            <TouchableOpacity
-              style={styles.changeRestaurantButton}
-              onPress={() => {
-                setRestaurantName("");
-
-                setGooglePlaceId(null);
-
-                setAddress("");
-
-                setCity("");
-
-                setState("");
-
-                setLatitude(null);
-
-                setLongitude(null);
-
-                setRestaurantResults([]);
-
-                setGoogleResults([]);
-
-                setDishName("");
-
-                setSelectedDishId(null);
-
-                setDishResults([]);
-
-                resetGoogleSession();
-              }}
-            >
-              <Text style={styles.changeRestaurantText}>Change restaurant</Text>
-            </TouchableOpacity>
-          </View>
-        ) : creatingNewRestaurant ? (
-          <View style={styles.newItemBox}>
-            <Text style={styles.newItemTitle}>New restaurant</Text>
-
-            <Text style={styles.newItemText}>
-              Select a Google result above when possible. If you don't, "
-              {restaurantName.trim()}" will be created manually.
-            </Text>
-          </View>
-        ) : null}
-
-        {!googlePlaceId ? (
+        {showRestaurantSearch ? (
           <>
-            <Text style={styles.label}>City</Text>
+            <Text style={styles.label}>Where did you eat?</Text>
 
             <TextInput
-              style={[
-                styles.input,
-
-                selectedRestaurantId && styles.inputDisabled,
-              ]}
-              placeholder="City"
+              style={styles.input}
+              placeholder="Search restaurants"
               placeholderTextColor={Palette.textMuted}
-              value={city}
-              onChangeText={setCity}
-              editable={!selectedRestaurantId}
+              value={restaurantName}
+              onChangeText={searchRestaurants}
             />
 
-            <Text style={styles.label}>State</Text>
+            {restaurantResults.length > 0 ? (
+              <View style={styles.resultsBox}>
+                <Text style={styles.resultsLabel}>On Food App</Text>
 
-            <TextInput
-              style={[
-                styles.input,
+                {restaurantResults.map((restaurant) => {
+                  const locationText =
+                    restaurant.address ||
+                    [restaurant.city, restaurant.state]
+                      .filter(Boolean)
+                      .join(", ");
 
-                selectedRestaurantId && styles.inputDisabled,
-              ]}
-              placeholder="State, e.g. AZ"
-              placeholderTextColor={Palette.textMuted}
-              value={state}
-              onChangeText={setState}
-              autoCapitalize="characters"
-              maxLength={30}
-              editable={!selectedRestaurantId}
-            />
-          </>
-        ) : null}
+                  return (
+                    <TouchableOpacity
+                      key={restaurant.id}
+                      style={styles.resultItem}
+                      onPress={() => selectRestaurant(restaurant)}
+                    >
+                      <Text style={styles.resultName}>{restaurant.name}</Text>
 
-        {!selectedRestaurantId && creatingNewRestaurant ? (
-          <View style={styles.locationSection}>
-            <Text style={styles.locationLabel}>Restaurant Location</Text>
-
-            {googlePlaceId && hasCoordinates ? (
-              <View style={styles.locationSavedBox}>
-                <View style={styles.locationSavedInfo}>
-                  <Text style={styles.locationSavedTitle}>
-                    ✓ Google location saved
-                  </Text>
-
-                  <Text style={styles.locationSavedText}>
-                    This restaurant's coordinates came from Google Places.
-                  </Text>
-                </View>
+                      {locationText ? (
+                        <Text style={styles.resultSubtext}>{locationText}</Text>
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
-            ) : (
-              <>
-                <Text style={styles.locationHelper}>
-                  Optional. Only use your current location if you are physically
-                  at the restaurant.
+            ) : null}
+
+            {googleLoading ? (
+              <View style={styles.googleLoadingRow}>
+                <ActivityIndicator size="small" />
+
+                <Text style={styles.googleLoadingText}>Searching nearby…</Text>
+              </View>
+            ) : null}
+
+            {googleResults.length > 0 ? (
+              <View style={styles.resultsBox}>
+                <Text style={styles.resultsLabel}>Nearby on Google</Text>
+
+                {googleResults.map((suggestion, index) => {
+                  const prediction = suggestion.placePrediction;
+
+                  const placeId = prediction?.placeId ?? `google-${index}`;
+
+                  const mainText =
+                    prediction?.structuredFormat?.mainText?.text ??
+                    prediction?.text?.text ??
+                    "Restaurant";
+
+                  const secondaryText =
+                    prediction?.structuredFormat?.secondaryText?.text ?? "";
+
+                  return (
+                    <TouchableOpacity
+                      key={placeId}
+                      style={styles.resultItem}
+                      onPress={() => selectGoogleRestaurant(suggestion)}
+                    >
+                      <Text style={styles.resultName}>{mainText}</Text>
+
+                      {secondaryText ? (
+                        <Text style={styles.resultSubtext}>
+                          {secondaryText}
+                        </Text>
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ) : null}
+
+            {restaurantName.trim().length >= 2 && !googleLoading ? (
+              <TouchableOpacity onPress={addRestaurantByName}>
+                <Text style={styles.fallbackLink}>
+                  Can’t find it? Add “{restaurantName.trim()}” by name
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <View style={styles.restaurantCard}>
+              <View style={styles.restaurantInfo}>
+                <Text style={styles.restaurantName} numberOfLines={1}>
+                  📍 {restaurantName.trim()}
                 </Text>
 
-                {hasCoordinates ? (
-                  <View style={styles.locationSavedBox}>
-                    <View style={styles.locationSavedInfo}>
-                      <Text style={styles.locationSavedTitle}>
-                        ✓ Location saved
-                      </Text>
+                {restaurantSubtitle ? (
+                  <Text style={styles.restaurantSubtitle} numberOfLines={1}>
+                    {restaurantSubtitle}
+                  </Text>
+                ) : null}
+              </View>
 
-                      <Text style={styles.locationSavedText}>
-                        Coordinates will be attached to this restaurant.
-                      </Text>
-                    </View>
-
-                    <TouchableOpacity onPress={removeLocation}>
-                      <Text style={styles.removeLocationText}>Remove</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.locationButton}
-                    onPress={useCurrentLocation}
-                    disabled={gettingLocation}
-                  >
-                    {gettingLocation ? (
-                      <ActivityIndicator size="small" />
-                    ) : (
-                      <Text style={styles.locationButtonText}>
-                        Use Current Location
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-                )}
-              </>
-            )}
-          </View>
-        ) : null}
-
-        <Text style={styles.label}>Dish</Text>
-
-        <TextInput
-          style={[
-            styles.input,
-
-            !selectedRestaurantId && styles.inputNeedsRestaurant,
-          ]}
-          placeholder={
-            menuLocationIds.length > 0
-              ? "Search or add a menu item"
-              : "Enter dish name"
-          }
-          placeholderTextColor={Palette.textMuted}
-          value={dishName}
-          onChangeText={searchDishes}
-        />
-
-        {!selectedRestaurantId && restaurantName.trim().length >= 2 ? (
-          <Text style={styles.helperText}>
-            If this restaurant has not been saved yet, enter the dish name and
-            we'll check for duplicates after the restaurant is created.
-          </Text>
-        ) : null}
-
-        {dishResults.length > 0 && !selectedDishId ? (
-          <View style={styles.resultsBox}>
-            <Text style={styles.resultsLabel}>Existing dishes</Text>
-
-            {dishResults.map((dish) => (
               <TouchableOpacity
-                key={dish.id}
-                style={styles.resultItem}
-                onPress={() => selectDish(dish)}
+                onPress={() => searchRestaurants("")}
+                disabled={loading}
               >
-                <Text style={styles.resultName}>{dish.name}</Text>
+                <Text style={styles.changeText}>Change</Text>
               </TouchableOpacity>
-            ))}
-          </View>
-        ) : null}
-
-        {selectedDishId ? (
-          <View style={styles.selectedBox}>
-            <Text style={styles.selectedTitle}>✓ Existing dish selected</Text>
-
-            <Text style={styles.selectedText}>{dishName}</Text>
-          </View>
-        ) : creatingNewDish ? (
-          <View style={styles.newItemBox}>
-            <Text style={styles.newItemTitle}>New dish</Text>
-
-            <Text style={styles.newItemText}>
-              We'll use an existing exact match if one already exists.
-              Otherwise, "{dishName.trim()}" will be created.
-            </Text>
-          </View>
-        ) : null}
-
-        {dishName.trim().length >= 2 && allTags.length > 0 ? (
-          <>
-            <Text style={styles.label}>Tags (Optional)</Text>
-
-            <View style={styles.tagChips}>
-              {allTags.map((tag) => {
-                const selected = activeTags.includes(tag.slug);
-
-                return (
-                  <TouchableOpacity
-                    key={tag.slug}
-                    style={[styles.tagChip, selected && styles.tagChipSelected]}
-                    onPress={() => toggleTag(tag.slug)}
-                  >
-                    <Text
-                      style={[
-                        styles.tagChipText,
-                        selected && styles.tagChipTextSelected,
-                      ]}
-                    >
-                      {tag.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
             </View>
+
+            {manualRestaurant ? (
+              <View style={styles.hereRow}>
+                <Text style={styles.hereText}>
+                  I’m here right now (saves its location)
+                </Text>
+
+                {gettingLocation ? (
+                  <ActivityIndicator size="small" />
+                ) : (
+                  <Switch
+                    value={atManualRestaurant}
+                    onValueChange={toggleAtManualRestaurant}
+                    trackColor={{ true: Palette.accent }}
+                  />
+                )}
+              </View>
+            ) : null}
           </>
-        ) : null}
+        )}
 
-        <Text style={styles.label}>Dish Rating</Text>
+        <Text style={[styles.label, styles.sectionLabel]}>
+          What did you eat?
+        </Text>
 
-        <StarRatingInput value={rating} onChange={setRating} />
+        {dishes.map((dish) => (
+          <LogDishCard
+            key={dish.key}
+            entry={dish}
+            allTags={allTags}
+            onSearch={searchMenu}
+            onChange={(patch) => updateDish(dish.key, patch)}
+            onRemove={dishes.length > 1 ? () => removeDish(dish.key) : undefined}
+            disabled={loading}
+          />
+        ))}
 
-        <Text style={styles.label}>Review</Text>
-
-        <TextInput
-          style={[styles.input, styles.reviewInput]}
-          placeholder="What did you think?"
-          placeholderTextColor={Palette.textMuted}
-          multiline
-          value={reviewText}
-          onChangeText={setReviewText}
-        />
+        <TouchableOpacity
+          style={styles.addDishButton}
+          onPress={() => setDishes((current) => [...current, createDishEntry()])}
+          disabled={loading}
+        >
+          <Text style={styles.addDishText}>+ Add another dish</Text>
+        </TouchableOpacity>
 
         <View style={styles.optionalLabelRow}>
-          <Text style={styles.label}>
-            How was the restaurant? (Optional)
+          <Text style={[styles.label, styles.sectionLabel]}>
+            {restaurantChosen
+              ? `How was ${restaurantName.trim()}?`
+              : "How was the restaurant?"}{" "}
+            <Text style={styles.optionalText}>(optional)</Text>
           </Text>
 
           {restaurantRating > 0 ? (
@@ -1838,115 +1511,79 @@ export default function LogScreen() {
         <StarRatingInput
           value={restaurantRating}
           onChange={setRestaurantRating}
+          compact
         />
 
-        <Text style={styles.label}>Who'd you go with? (Optional)</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Search your mutual followers..."
-          placeholderTextColor={Palette.textMuted}
-          value={friendSearch}
-          onChangeText={setFriendSearch}
-        />
-
-        {friendsLoading ? (
-          <ActivityIndicator size="small" style={styles.friendsLoading} />
-        ) : friends.length === 0 ? (
-          <Text style={styles.friendsHelper}>No mutual followers yet.</Text>
-        ) : (
-          <View style={styles.friendsList}>
-            {friends
-              .filter((friend) =>
-                `${friend.username} ${friend.display_name ?? ""}`
-                  .toLowerCase()
-                  .includes(friendSearch.trim().toLowerCase()),
-              )
-              .map((friend) => {
-                const selected = selectedFriends.includes(friend.id);
-                return (
-                  <TouchableOpacity
-                    key={friend.id}
-                    style={[
-                      styles.friendRow,
-                      selected && styles.friendSelected,
-                    ]}
-                    onPress={() => toggleFriend(friend.id)}
-                    disabled={loading}
-                  >
-                    <View>
-                      <Text style={styles.friendName}>
-                        {friend.display_name || friend.username}
-                      </Text>
-                      <Text style={styles.friendHandle}>
-                        @{friend.username}
-                      </Text>
-                    </View>
-                    <Text style={styles.friendCheck}>
-                      {selected ? "✓" : "+"}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-          </View>
-        )}
-
-        {selectedFriends.length > 0 ? (
-          <Text style={styles.friendsHelper}>
-            {selectedFriends.length} friend(s) selected
+        <TouchableOpacity onPress={() => setShowFriends((open) => !open)}>
+          <Text style={styles.friendsToggle}>
+            {showFriends
+              ? "− Who’d you go with?"
+              : selectedFriends.length > 0
+                ? `+ Who’d you go with? (${selectedFriends.length} selected)`
+                : "+ Who’d you go with?"}
           </Text>
-        ) : null}
+        </TouchableOpacity>
 
-        <Text style={styles.label}>Photo</Text>
+        {showFriends ? (
+          <View style={styles.friendsSection}>
+            {friendsLoading ? (
+              <ActivityIndicator size="small" style={styles.friendsLoading} />
+            ) : friends.length === 0 ? (
+              <Text style={styles.friendsHelper}>No mutual followers yet.</Text>
+            ) : (
+              <>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Search your mutual followers..."
+                  placeholderTextColor={Palette.textMuted}
+                  value={friendSearch}
+                  onChangeText={setFriendSearch}
+                />
 
-        {photoUri ? (
-          <View style={styles.photoArea}>
-            <Image
-              source={{
-                uri: photoUri,
-              }}
-              style={styles.photoPreview}
-            />
+                {visibleFriends.map((friend) => {
+                  const selected = selectedFriends.includes(friend.id);
 
-            <View style={styles.photoActions}>
-              <TouchableOpacity
-                style={styles.changePhotoButton}
-                onPress={pickPhoto}
-              >
-                <Text style={styles.changePhotoText}>Change Photo</Text>
-              </TouchableOpacity>
+                  return (
+                    <TouchableOpacity
+                      key={friend.id}
+                      style={[
+                        styles.friendRow,
+                        selected && styles.friendSelected,
+                      ]}
+                      onPress={() => toggleFriend(friend.id)}
+                      disabled={loading}
+                    >
+                      <View>
+                        <Text style={styles.friendName}>
+                          {friend.display_name || friend.username}
+                        </Text>
 
-              <TouchableOpacity
-                style={styles.removePhotoButton}
-                onPress={() => setPhotoUri(null)}
-              >
-                <Text style={styles.removePhotoText}>Remove</Text>
-              </TouchableOpacity>
-            </View>
+                        <Text style={styles.friendHandle}>
+                          @{friend.username}
+                        </Text>
+                      </View>
+
+                      <Text style={styles.friendCheck}>
+                        {selected ? "✓" : "+"}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            )}
           </View>
-        ) : (
-          <TouchableOpacity style={styles.addPhotoButton} onPress={pickPhoto}>
-            <Text style={styles.addPhotoIcon}>+</Text>
-
-            <View>
-              <Text style={styles.addPhotoTitle}>Add Photo</Text>
-
-              <Text style={styles.addPhotoSubtitle}>Optional</Text>
-            </View>
-          </TouchableOpacity>
-        )}
+        ) : null}
 
         <TouchableOpacity
           style={[styles.button, loading && styles.buttonDisabled]}
-          onPress={logDish}
+          onPress={logVisit}
           disabled={loading}
         >
           <Text style={styles.buttonText}>
             {loading
-              ? photoUri
-                ? "Uploading & Logging..."
-                : "Logging..."
-              : dishName.trim()
-                ? "Log Dish"
+              ? "Saving..."
+              : namedDishes.length > 0
+                ? `Log ${plural(namedDishes.length, "dish")}`
                 : "Save Restaurant Rating"}
           </Text>
         </TouchableOpacity>
@@ -1974,28 +1611,36 @@ const styles = StyleSheet.create({
 
   title: {
     color: Palette.text,
+
     fontSize: 30,
 
     fontWeight: "700",
-  },
 
-  subtitle: {
-    fontSize: 16,
-
-    color: Palette.textSecondary,
-
-    marginTop: 8,
-
-    marginBottom: 30,
+    marginBottom: 24,
   },
 
   label: {
     color: Palette.text,
+
     fontSize: 14,
 
     fontWeight: "600",
 
     marginBottom: 6,
+  },
+
+  sectionLabel: {
+    fontSize: 16,
+
+    marginTop: 18,
+
+    marginBottom: 10,
+  },
+
+  optionalText: {
+    color: Palette.textMuted,
+
+    fontWeight: "400",
   },
 
   input: {
@@ -2016,16 +1661,6 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.background,
   },
 
-  inputDisabled: {
-    backgroundColor: Palette.surface,
-
-    color: Palette.textSecondary,
-  },
-
-  inputNeedsRestaurant: {
-    borderColor: Palette.borderStrong,
-  },
-
   resultsBox: {
     borderWidth: 1,
 
@@ -2033,9 +1668,11 @@ const styles = StyleSheet.create({
 
     borderRadius: 10,
 
-    marginBottom: 14,
+    marginBottom: 12,
 
     overflow: "hidden",
+
+    backgroundColor: Palette.surface,
   },
 
   resultsLabel: {
@@ -2045,17 +1682,19 @@ const styles = StyleSheet.create({
 
     color: Palette.textMuted,
 
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
 
     paddingTop: 10,
 
-    paddingBottom: 6,
+    paddingBottom: 4,
+
+    textTransform: "uppercase",
   },
 
   resultItem: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
 
-    paddingVertical: 11,
+    paddingVertical: 12,
 
     borderTopWidth: 1,
 
@@ -2063,10 +1702,11 @@ const styles = StyleSheet.create({
   },
 
   resultName: {
-    color: Palette.text,
     fontSize: 16,
 
     fontWeight: "600",
+
+    color: Palette.text,
   },
 
   resultSubtext: {
@@ -2082,159 +1722,28 @@ const styles = StyleSheet.create({
 
     alignItems: "center",
 
-    marginBottom: 14,
+    gap: 8,
 
-    paddingVertical: 4,
+    marginBottom: 12,
   },
 
   googleLoadingText: {
-    fontSize: 12,
-
-    color: Palette.textMuted,
-
-    marginLeft: 8,
-  },
-
-  selectedBox: {
-    borderWidth: 1,
-
-    borderColor: Palette.borderStrong,
-
-    borderRadius: 10,
-
-    padding: 12,
-
-    marginBottom: 16,
-
-    backgroundColor: Palette.surface,
-  },
-
-  googleSelectedBox: {
-    borderWidth: 1,
-
-    borderColor: Palette.borderStrong,
-
-    borderRadius: 10,
-
-    padding: 12,
-
-    marginBottom: 16,
-
-    backgroundColor: Palette.surface,
-  },
-
-  selectedTitle: {
-    fontSize: 12,
-
-    fontWeight: "700",
-
-    color: Palette.textSecondary,
-  },
-
-  selectedText: {
-    color: Palette.text,
     fontSize: 14,
 
-    fontWeight: "600",
-
-    marginTop: 3,
-  },
-
-  selectedLocation: {
-    fontSize: 12,
-
-    color: Palette.textMuted,
-
-    marginTop: 3,
-  },
-
-  newItemBox: {
-    borderWidth: 1,
-
-    borderColor: Palette.border,
-
-    borderRadius: 10,
-
-    padding: 12,
-
-    marginBottom: 16,
-  },
-
-  newItemTitle: {
-    fontSize: 12,
-
-    fontWeight: "700",
-
     color: Palette.textMuted,
   },
 
-  newItemText: {
-    fontSize: 13,
+  fallbackLink: {
+    fontSize: 14,
 
     color: Palette.textSecondary,
 
-    lineHeight: 18,
+    textDecorationLine: "underline",
 
-    marginTop: 3,
+    marginBottom: 8,
   },
 
-  helperText: {
-    fontSize: 12,
-
-    lineHeight: 17,
-
-    color: Palette.textMuted,
-
-    marginTop: -4,
-
-    marginBottom: 14,
-  },
-
-  locationSection: {
-    marginBottom: 20,
-  },
-
-  locationLabel: {
-    color: Palette.text,
-    fontSize: 14,
-
-    fontWeight: "600",
-  },
-
-  locationHelper: {
-    fontSize: 12,
-
-    color: Palette.textMuted,
-
-    lineHeight: 17,
-
-    marginTop: 4,
-
-    marginBottom: 10,
-  },
-
-  locationButton: {
-    borderWidth: 1,
-
-    borderColor: Palette.borderStrong,
-
-    borderRadius: 10,
-
-    minHeight: 46,
-
-    justifyContent: "center",
-
-    alignItems: "center",
-  },
-
-  locationButtonText: {
-    color: Palette.text,
-    fontSize: 14,
-
-    fontWeight: "700",
-  },
-
-  locationSavedBox: {
+  restaurantCard: {
     flexDirection: "row",
 
     alignItems: "center",
@@ -2243,80 +1752,83 @@ const styles = StyleSheet.create({
 
     borderColor: Palette.borderStrong,
 
-    borderRadius: 10,
+    borderRadius: 14,
 
-    padding: 12,
+    padding: 14,
 
     backgroundColor: Palette.surface,
   },
 
-  locationSavedInfo: {
+  restaurantInfo: {
     flex: 1,
 
     paddingRight: 12,
   },
 
-  locationSavedTitle: {
-    color: Palette.text,
-    fontSize: 13,
+  restaurantName: {
+    fontSize: 17,
 
     fontWeight: "700",
+
+    color: Palette.text,
   },
 
-  locationSavedText: {
-    fontSize: 12,
+  restaurantSubtitle: {
+    fontSize: 13,
 
     color: Palette.textMuted,
 
-    marginTop: 2,
+    marginTop: 3,
   },
 
-  removeLocationText: {
-    fontSize: 12,
-
-    color: Palette.danger,
+  changeText: {
+    fontSize: 14,
 
     fontWeight: "600",
+
+    color: Palette.accent,
   },
 
-  tagChips: {
+  hereRow: {
     flexDirection: "row",
 
-    flexWrap: "wrap",
+    alignItems: "center",
 
-    gap: 8,
+    justifyContent: "space-between",
 
-    marginBottom: 22,
+    marginTop: 10,
   },
 
-  tagChip: {
-    paddingHorizontal: 12,
+  hereText: {
+    flex: 1,
 
-    paddingVertical: 7,
+    fontSize: 14,
 
-    borderRadius: 16,
+    color: Palette.textSecondary,
 
+    paddingRight: 12,
+  },
+
+  addDishButton: {
     borderWidth: 1,
 
+    borderStyle: "dashed",
+
     borderColor: Palette.borderStrong,
+
+    borderRadius: 14,
+
+    paddingVertical: 14,
+
+    alignItems: "center",
   },
 
-  tagChipSelected: {
-    backgroundColor: Palette.accent,
-
-    borderColor: Palette.accent,
-  },
-
-  tagChipText: {
-    fontSize: 13,
+  addDishText: {
+    fontSize: 15,
 
     fontWeight: "600",
 
     color: Palette.textSecondary,
-  },
-
-  tagChipTextSelected: {
-    color: Palette.text,
   },
 
   optionalLabelRow: {
@@ -2335,175 +1847,101 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
-  reviewInput: {
-    minHeight: 110,
+  friendsToggle: {
+    fontSize: 15,
 
-    textAlignVertical: "top",
+    fontWeight: "600",
+
+    color: Palette.textSecondary,
+
+    marginBottom: 12,
   },
 
-  addPhotoButton: {
+  friendsSection: {
+    marginBottom: 8,
+  },
+
+  friendsLoading: {
+    marginVertical: 12,
+  },
+
+  friendsHelper: {
+    fontSize: 14,
+
+    color: Palette.textMuted,
+
+    marginBottom: 12,
+  },
+
+  friendRow: {
     flexDirection: "row",
 
     alignItems: "center",
+
+    justifyContent: "space-between",
 
     borderWidth: 1,
 
     borderColor: Palette.borderStrong,
 
-    borderRadius: 12,
+    borderRadius: 10,
 
-    padding: 16,
+    paddingHorizontal: 14,
 
-    marginBottom: 22,
+    paddingVertical: 10,
+
+    marginBottom: 8,
   },
 
-  addPhotoIcon: {
-    color: Palette.text,
-    fontSize: 28,
-
-    marginRight: 14,
-
-    fontWeight: "300",
+  friendSelected: {
+    borderColor: Palette.accent,
   },
 
-  addPhotoTitle: {
-    color: Palette.text,
+  friendName: {
     fontSize: 15,
 
-    fontWeight: "700",
+    fontWeight: "600",
+
+    color: Palette.text,
   },
 
-  addPhotoSubtitle: {
-    fontSize: 12,
+  friendHandle: {
+    fontSize: 13,
 
     color: Palette.textMuted,
 
     marginTop: 2,
   },
 
-  photoArea: {
-    marginBottom: 22,
-  },
-
-  photoPreview: {
-    width: "100%",
-
-    aspectRatio: 4 / 3,
-
-    borderRadius: 14,
-
-    backgroundColor: Palette.elevated,
-  },
-
-  photoActions: {
-    flexDirection: "row",
-
-    marginTop: 10,
-
-    gap: 16,
-  },
-
-  changePhotoButton: {
-    paddingVertical: 6,
-  },
-
-  changePhotoText: {
-    color: Palette.text,
-    fontSize: 13,
+  friendCheck: {
+    fontSize: 18,
 
     fontWeight: "700",
-  },
 
-  removePhotoButton: {
-    paddingVertical: 6,
-  },
-
-  removePhotoText: {
-    fontSize: 13,
-
-    fontWeight: "600",
-
-    color: Palette.danger,
+    color: Palette.accent,
   },
 
   button: {
     backgroundColor: Palette.accent,
 
-    padding: 16,
+    borderRadius: 12,
 
-    borderRadius: 10,
+    paddingVertical: 16,
 
     alignItems: "center",
 
-    marginTop: 4,
+    marginTop: 16,
   },
 
   buttonDisabled: {
-    opacity: 0.5,
+    opacity: 0.6,
   },
 
   buttonText: {
     color: Palette.text,
 
-    fontSize: 16,
+    fontSize: 17,
 
-    fontWeight: "600",
-  },
-
-  changeRestaurantButton: {
-    marginTop: 10,
-
-    alignSelf: "flex-start",
-  },
-
-  changeRestaurantText: {
-    fontSize: 13,
-
-    fontWeight: "600",
-
-    color: Palette.textSecondary,
-
-    textDecorationLine: "underline",
-  },
-
-  friendsLoading: {
-    marginBottom: 12,
-  },
-  friendsList: {
-    marginBottom: 12,
-  },
-  friendRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 12,
-    borderWidth: 1,
-    borderColor: Palette.border,
-    borderRadius: 10,
-    marginBottom: 8,
-  },
-  friendSelected: {
-    backgroundColor: Palette.surface,
-    borderColor: Palette.accent,
-  },
-  friendName: {
-    color: Palette.text,
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  friendHandle: {
-    fontSize: 13,
-    color: Palette.textMuted,
-    marginTop: 3,
-  },
-  friendCheck: {
-    color: Palette.text,
-    fontSize: 20,
     fontWeight: "700",
-  },
-  friendsHelper: {
-    fontSize: 13,
-    color: Palette.textMuted,
-    marginBottom: 15,
   },
 });

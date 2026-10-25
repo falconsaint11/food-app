@@ -7,6 +7,9 @@ type StarRatingInputProps = {
   value: number;
 
   onChange: (value: number) => void;
+
+  // Hides the "tap or drag" hint and tightens spacing, for stacked cards.
+  compact?: boolean;
 };
 
 export function getRatingLabel(value: number) {
@@ -34,7 +37,11 @@ export function getRatingLabel(value: number) {
 }
 
 // Five stars rated in half steps by tapping or dragging across them.
-export function StarRatingInput({ value, onChange }: StarRatingInputProps) {
+export function StarRatingInput({
+  value,
+  onChange,
+  compact = false,
+}: StarRatingInputProps) {
   const [ratingWidth, setRatingWidth] = useState(0);
 
   const [ratingLeftX, setRatingLeftX] = useState(0);
@@ -68,7 +75,7 @@ export function StarRatingInput({ value, onChange }: StarRatingInputProps) {
   }
 
   return (
-    <View style={styles.ratingSection}>
+    <View style={[styles.ratingSection, compact && styles.compactSection]}>
       <View
         ref={ratingRowRef}
         style={styles.ratingTouchArea}
@@ -113,9 +120,11 @@ export function StarRatingInput({ value, onChange }: StarRatingInputProps) {
         })}
       </View>
 
-      <Text style={styles.dragHint}>Tap or drag across the stars</Text>
+      {compact ? null : (
+        <Text style={styles.dragHint}>Tap or drag across the stars</Text>
+      )}
 
-      <View style={styles.ratingSummary}>
+      <View style={[styles.ratingSummary, compact && styles.compactSummary]}>
         <Text style={styles.ratingNumber}>
           {value > 0 ? value.toFixed(1) : "—"}
         </Text>
@@ -129,6 +138,14 @@ export function StarRatingInput({ value, onChange }: StarRatingInputProps) {
 const styles = StyleSheet.create({
   ratingSection: {
     marginBottom: 22,
+  },
+
+  compactSection: {
+    marginBottom: 12,
+  },
+
+  compactSummary: {
+    marginTop: 4,
   },
 
   ratingTouchArea: {

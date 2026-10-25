@@ -59,10 +59,13 @@ one vote. Dish reviews never count toward the restaurant rating; a restaurant
 nobody has rated shows "No ratings yet".
 
 Ways to rate:
-- **Log tab with a dish:** dish stars (required) and "How was the restaurant?"
-  (optional), saved for that location.
-- **Log tab with no dish:** just the restaurant stars, saved for that location
-  ("Save Restaurant Rating"). Notes, photos and friends need a dish.
+- **Log tab ("Log a Visit"):** pick the restaurant once, then add any number of
+  dish cards (name + stars; notes, photo and tags tucked under "+ Notes, photo,
+  tags"). "How was …?" restaurant stars and "Who'd you go with?" apply to the
+  whole visit, and friends are tagged on every dish review. Each dish gets the
+  duplicate check ("Did you mean …?") when saving.
+- **Log tab with no dishes:** just the restaurant stars, saved for that
+  location ("Save Restaurant Rating"). Tagging friends needs a dish.
 - **Restaurant page, ★ Rate:** a pop-up with only the stars. It saves one
   brand-wide rating, so there's no location to pick.
 - **Restaurant page, + Log a dish** and **dish page, ★ Rate this dish:** open
@@ -89,6 +92,15 @@ from is used.
   `SIMILAR_DISH_PROMPT_SCORE` in `app/(tabs)/log.tsx`).
 - Picking a dish that only exists at another location creates a row for it at
   the current location, using the existing name.
+
+### Restaurants Google doesn't have
+
+The Log tab only lets you pick restaurants from search (saved ones or Google).
+For a place Google doesn't list, "Can't find it? Add … by name" creates it by
+name only. The optional "I'm here right now" switch saves the phone's location
+as the restaurant's coordinates and fills in the city and state from it. A
+by-name restaurant is only reused for another log if the name, city and state
+match.
 
 ## Dish tags
 
