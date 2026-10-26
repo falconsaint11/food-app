@@ -21,6 +21,7 @@ import {
   getBrandLocationsNearestFirst,
 } from '@/lib/brands';
 import { withoutHiddenUsers } from '@/lib/moderation';
+import { formatRating, useIsPremium } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
 import { fetchDishPublicTags, Tag } from '@/lib/tags';
 import { Palette } from '@/constants/theme';
@@ -56,6 +57,7 @@ type DishReview = {
 };
 
 export default function DishDetailScreen() {
+  const isPremium = useIsPremium();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [dish, setDish] = useState<Dish | null>(null);
@@ -402,7 +404,7 @@ export default function DishDetailScreen() {
                   </View>
 
                   <Text style={styles.reviewRating}>
-                    {review.rating}★
+                    {formatRating(review.rating, isPremium)}★
                   </Text>
                 </View>
 

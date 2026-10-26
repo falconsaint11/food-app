@@ -16,6 +16,7 @@ import {
 import { StarRatingInput } from '@/components/star-rating-input';
 import { Palette } from '@/constants/theme';
 import { getBrandLocationIds } from '@/lib/brands';
+import { formatRating, useIsPremium } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
 
 type RateRestaurantButtonProps = {
@@ -37,6 +38,7 @@ export function RateRestaurantButton({
   onSaved,
   style,
 }: RateRestaurantButtonProps) {
+  const isPremium = useIsPremium();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -159,7 +161,7 @@ export function RateRestaurantButton({
               {pastRatings.length === 1
                 ? 'once'
                 : `${pastRatings.length} times`}{' '}
-              · last {pastRatings[0].toFixed(1)} ★
+              · last {formatRating(pastRatings[0], isPremium)} ★
             </Text>
           ) : null}
 

@@ -23,6 +23,7 @@ import {
   getBrandLocationsNearestFirst,
 } from '@/lib/brands';
 import { withoutHiddenUsers } from '@/lib/moderation';
+import { formatRating, useIsPremium } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
 import { Palette } from '@/constants/theme';
 
@@ -75,6 +76,7 @@ const TOP_ITEM_COUNT = 3;
 const RESTAURANT_NOTE_COUNT = 5;
 
 export default function RestaurantDetailScreen() {
+  const isPremium = useIsPremium();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
@@ -525,7 +527,7 @@ export default function RestaurantDetailScreen() {
 
                   {note.rating !== null ? (
                     <Text style={styles.reviewRating}>
-                      {note.rating}★
+                      {formatRating(note.rating, isPremium)}★
                     </Text>
                   ) : null}
 
@@ -583,7 +585,7 @@ export default function RestaurantDetailScreen() {
                   </View>
 
                   <Text style={styles.reviewRating}>
-                    {review.rating}★
+                    {formatRating(review.rating, isPremium)}★
                   </Text>
                 </View>
 

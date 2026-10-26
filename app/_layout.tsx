@@ -124,8 +124,13 @@ export default function RootLayout() {
           options={{ presentation: "modal", title: "Modal" }}
         />
         <Stack.Screen
+          name="compare"
+          options={{ title: "Which Was Better?" }}
+        />
+        <Stack.Screen name="rank-dishes" options={{ title: "Top Dishes" }} />
+        <Stack.Screen
           name="rank-restaurants"
-          options={{ title: "Rank Restaurants" }}
+          options={{ title: "Top Restaurants" }}
         />
       </Stack>
       <StatusBar style="light" />

@@ -85,6 +85,42 @@ Ways to rate:
 These buttons never ask for it. Without it, the location the page was opened
 from is used.
 
+## Comparisons and exact scores
+
+Ratings can have two decimals (`numeric(3, 2)`, 0.5 to 5). Everyone still
+picks half-stars when logging.
+
+- **"Which was better?"** (`app/compare.tsx`, from the button on your
+  profile) shows two of your dishes, or two restaurants, in the same star
+  level and at most 0.1 apart, closest first. Pairs you've already answered
+  don't come back; skipped ones return next time.
+- **Way better** moves the winner up 0.10 and the loser down 0.10. **A little
+  better** moves each 0.03. **About the same** changes nothing. If the winner
+  started below the loser, they're split around the middle so the winner ends
+  up ahead.
+- **Scores never leave their star level:** a 4.5 stays between 4.25 and 4.74
+  (4.75 to 5 for 5, 0.5 to 0.74 for 0.5).
+- **Only the latest entry changes:** your newest review of the dish, or your
+  newest visit with stars to the restaurant (any location of the brand).
+- Every answer is saved in `rating_comparisons` with the scores before and
+  after, for undo or recalculating later.
+
+**Ratings chart** (`components/ratings-chart.tsx`, on every profile under Top
+Restaurants): one bar per half-star, Letterboxd style, counting each dish or
+restaurant once at the user's latest score. Exact scores count toward the
+half-star they round to. Tapping a bar opens `app/ratings.tsx`, everything at
+that level, best first (Premium members see the exact scores).
+
+**Premium:** members (rows in `premium_members`) see exact scores everywhere
+and can edit them on the comparison screen. Everyone else sees the half-star
+a score rounds to (`formatRating()` in `lib/ratings.ts`; use it anywhere a
+rating is shown). A database trigger refuses non-half-star scores from
+non-members except through `compare_ratings()`. There's no purchase flow yet:
+
+```sql
+insert into premium_members (user_id) values ('<user id>');
+```
+
 ## Dishes and duplicates
 
 - Dishes belong to a **location** (`dishes.restaurant_id`), so each review
@@ -195,6 +231,7 @@ have already been run on the shared project.
 | `20261029000000_restaurant_visit_notes.sql` | Optional `notes` on each visit (max 2,000 characters) |
 | `20261030000000_delete_my_account.sql` | `delete_my_account()` and a storage rule letting users delete their own photo folders |
 | `20261031000000_report_and_block.sql` | `reports` and `blocks` tables, `block_user()`, `my_hidden_user_ids()`, triggers refusing follows/comments/tags between blocked users |
+| `20261101000000_rating_comparisons.sql` | Two-decimal ratings, `premium_members`, `rating_comparisons`, `compare_ratings()`, and the Premium check on exact scores |
 
 Don't add a foreign key from `dishes` to `reviews`. `reviews.dish_id` already
 links them, and a second link breaks every `reviews … dishes (…)` query.

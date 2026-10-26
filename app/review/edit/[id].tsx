@@ -464,8 +464,11 @@ export default function EditReviewScreen() {
           >
             {ratingOptions.map(
               (option) => {
+                // Scores from comparisons (4.37) highlight
+                // their half-star (4.5).
                 const selected =
-                  rating === option;
+                  Math.round(rating * 2) / 2 ===
+                  option;
 
                 return (
                   <TouchableOpacity

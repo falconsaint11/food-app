@@ -1,3 +1,4 @@
+import { formatRating, useIsPremium } from "@/lib/ratings";
 import { supabase } from "@/lib/supabase";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
@@ -48,6 +49,7 @@ type FeedItem = {
 };
 const reactionOrder: ReactionType[] = ["😂", "🔥", "🤤", "❤️"];
 export default function HomeScreen() {
+  const isPremium = useIsPremium();
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedReviews, setExpandedReviews] = useState<string[]>([]);
@@ -291,7 +293,7 @@ export default function HomeScreen() {
                     </Text>
                   )}
                 </View>
-                <Text style={styles.rating}>{item.rating}★</Text>
+                <Text style={styles.rating}>{formatRating(item.rating, isPremium)}★</Text>
               </View>
               {photoUrl ? (
                 <TouchableOpacity

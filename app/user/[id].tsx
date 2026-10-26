@@ -15,7 +15,10 @@ import {
 
 import { ContentMenu } from '@/components/content-menu';
 import { ListsSection } from '@/components/lists-section';
+import { RatingsChart } from '@/components/ratings-chart';
+import { latestPhotoPaths, TopPickCard } from '@/components/top-pick-card';
 import { fetchHiddenUserIds, unblockUser } from '@/lib/moderation';
+import { formatRating, useIsPremium } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
 import { Palette } from '@/constants/theme';
 
@@ -61,6 +64,7 @@ type RankedRestaurant = {
     name: string;
 
     city: string | null;
+    brand_id: string | null;
   } | null;
 };
 
@@ -86,11 +90,13 @@ type DiaryEntry = {
       name: string;
 
       city: string | null;
+      brand_id: string | null;
     } | null;
   } | null;
 };
 
 export default function UserProfileScreen() {
+  const isPremium = useIsPremium();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [profile, setProfile] = useState<PublicProfile | null>(null);
@@ -100,6 +106,8 @@ export default function UserProfileScreen() {
   const [topRestaurants, setTopRestaurants] = useState<RankedRestaurant[]>([]);
 
   const [diary, setDiary] = useState<DiaryEntry[]>([]);
+  // Every review, not just the 3 shown in the diary, for top pick photos.
+  const [allEntries, setAllEntries] = useState<DiaryEntry[]>([]);
 
   const [loading, setLoading] = useState(true);
 
@@ -316,7 +324,8 @@ export default function UserProfileScreen() {
 
           name,
 
-          city
+          city,
+          brand_id
 
         )
 
@@ -376,7 +385,8 @@ export default function UserProfileScreen() {
 
             name,
 
-            city
+            city,
+            brand_id
 
           )
 
@@ -410,6 +420,8 @@ export default function UserProfileScreen() {
     const entries = (diaryData ?? []) as unknown as DiaryEntry[];
 
     setDiary(entries.slice(0, 3));
+
+    setAllEntries(entries);
 
     setReviewCount(entries.length);
 
@@ -516,6 +528,15 @@ export default function UserProfileScreen() {
       .getPublicUrl(path);
 
     return data.publicUrl;
+  }
+
+  // Top picks show the user's newest photo of that dish or restaurant.
+  const topPhotos = latestPhotoPaths(allEntries);
+
+  function getTopPhotoUrl(paths: Map<string, string>, id: string | undefined) {
+    const path = id ? paths.get(id) : undefined;
+
+    return path ? getPhotoUrl(path) : null;
   }
 
   function getProfilePhotoUrl(path: string) {
@@ -754,36 +775,17 @@ export default function UserProfileScreen() {
               .slice(0, 4)
 
               .map((item) => (
-                <TouchableOpacity
+                <TopPickCard
                   key={item.id}
-                  style={styles.featureCard}
-                  activeOpacity={0.7}
+                  rank={item.rank}
+                  title={item.dishes?.name ?? "Unknown dish"}
+                  subtitle={item.dishes?.restaurants?.name ?? "Unknown restaurant"}
+                  photoUrl={getTopPhotoUrl(topPhotos.byDish, item.dishes?.id)}
                   onPress={() => {
-                    if (!item.dishes?.id) {
-                      return;
-                    }
-
-                    router.push({
-                      pathname: "/dish/[id]",
-
-                      params: {
-                        id: item.dishes.id,
-                      },
-                    });
+                    if (!item.dishes?.id) return;
+                    router.push({ pathname: "/dish/[id]", params: { id: item.dishes.id } });
                   }}
-                >
-                  <View style={styles.rankBadge}>
-                    <Text style={styles.rankBadgeText}>#{item.rank}</Text>
-                  </View>
-
-                  <Text style={styles.featureName} numberOfLines={2}>
-                    {item.dishes?.name ?? "Unknown dish"}
-                  </Text>
-
-                  <Text style={styles.featureSubtext} numberOfLines={1}>
-                    {item.dishes?.restaurants?.name ?? "Unknown restaurant"}
-                  </Text>
-                </TouchableOpacity>
+                />
               ))}
           </View>
         )}
@@ -803,40 +805,29 @@ export default function UserProfileScreen() {
               .slice(0, 4)
 
               .map((item) => (
-                <TouchableOpacity
+                <TopPickCard
                   key={item.id}
-                  style={styles.featureCard}
-                  activeOpacity={0.7}
+                  rank={item.rank}
+                  title={item.restaurants?.name ?? "Unknown restaurant"}
+                  subtitle={item.restaurants?.city ?? "Location unknown"}
+                  photoUrl={getTopPhotoUrl(
+                    topPhotos.byRestaurant,
+                    item.restaurants?.brand_id ?? item.restaurants?.id,
+                  )}
                   onPress={() => {
-                    if (!item.restaurants?.id) {
-                      return;
-                    }
-
+                    if (!item.restaurants?.id) return;
                     router.push({
                       pathname: "/restaurant/[id]",
-
-                      params: {
-                        id: item.restaurants.id,
-                      },
+                      params: { id: item.restaurants.id },
                     });
                   }}
-                >
-                  <View style={styles.rankBadge}>
-                    <Text style={styles.rankBadgeText}>#{item.rank}</Text>
-                  </View>
-
-                  <Text style={styles.featureName} numberOfLines={2}>
-                    {item.restaurants?.name ?? "Unknown restaurant"}
-                  </Text>
-
-                  <Text style={styles.featureSubtext} numberOfLines={1}>
-                    {item.restaurants?.city ?? "Location unknown"}
-                  </Text>
-                </TouchableOpacity>
+                />
               ))}
           </View>
         )}
       </View>
+
+      <RatingsChart userId={id} />
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Recent Diary</Text>
@@ -895,7 +886,7 @@ export default function UserProfileScreen() {
                       </View>
 
                       <View style={styles.diaryRight}>
-                        <Text style={styles.rating}>{entry.rating}★</Text>
+                        <Text style={styles.rating}>{formatRating(entry.rating, isPremium)}★</Text>
 
                         <Text style={styles.dateText}>
                           {formatDate(entry.date_eaten)}
@@ -1165,65 +1156,15 @@ const styles = StyleSheet.create({
   featureGrid: {
     flexDirection: "row",
 
-    flexWrap: "wrap",
+    flexWrap: "nowrap",
 
-    gap: 10,
+    gap: 8,
   },
 
-  featureCard: {
-    width: "48%",
 
-    minHeight: 118,
 
-    borderWidth: 1,
 
-    borderColor: Palette.border,
 
-    borderRadius: 14,
-
-    padding: 14,
-
-    justifyContent: "flex-start",
-  },
-
-  rankBadge: {
-    alignSelf: "flex-start",
-
-    backgroundColor: Palette.accent,
-
-    borderRadius: 7,
-
-    paddingHorizontal: 8,
-
-    paddingVertical: 4,
-
-    marginBottom: 12,
-  },
-
-  rankBadgeText: {
-    color: Palette.text,
-
-    fontSize: 12,
-
-    fontWeight: "700",
-  },
-
-  featureName: {
-    color: Palette.text,
-    fontSize: 16,
-
-    fontWeight: "700",
-
-    lineHeight: 20,
-  },
-
-  featureSubtext: {
-    fontSize: 12,
-
-    color: Palette.textMuted,
-
-    marginTop: 5,
-  },
 
   emptyCard: {
     borderWidth: 1,

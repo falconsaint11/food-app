@@ -18,6 +18,7 @@ import {
 
 import { ContentMenu } from "@/components/content-menu";
 import { fetchHiddenUserIds, withoutHiddenUsers } from "@/lib/moderation";
+import { formatRating, useIsPremium } from "@/lib/ratings";
 import { supabase } from "@/lib/supabase";
 import { Palette } from "@/constants/theme";
 
@@ -90,6 +91,7 @@ type Comment = {
 const reactions: ReactionType[] = ["😂", "🔥", "🤤", "❤️"];
 
 export default function ReviewDetailScreen() {
+  const isPremium = useIsPremium();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [review, setReview] = useState<Review | null>(null);
@@ -822,7 +824,7 @@ export default function ReviewDetailScreen() {
               )}
             </View>
 
-            <Text style={styles.rating}>{review.rating}★</Text>
+            <Text style={styles.rating}>{formatRating(review.rating, isPremium)}★</Text>
           </View>
 
           {photoUrl ? (

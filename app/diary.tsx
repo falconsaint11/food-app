@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 
+import { formatRating, useIsPremium } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
 import { Palette } from '@/constants/theme';
 
@@ -30,6 +31,7 @@ type DiaryEntry = {
 };
 
 export default function DiaryScreen() {
+  const isPremium = useIsPremium();
   const [diary, setDiary] = useState<DiaryEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -158,7 +160,7 @@ export default function DiaryScreen() {
                 </View>
 
                 <Text style={styles.rating}>
-                  {entry.rating}★
+                  {formatRating(entry.rating, isPremium)}★
                 </Text>
               </View>
 

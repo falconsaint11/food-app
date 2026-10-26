@@ -1,3 +1,4 @@
+import { formatRating, useIsPremium } from "@/lib/ratings";
 import { supabase } from "@/lib/supabase";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
@@ -13,6 +14,8 @@ import {
 } from "react-native";
 
 import { ListsSection } from "@/components/lists-section";
+import { RatingsChart } from "@/components/ratings-chart";
+import { latestPhotoPaths, TopPickCard } from "@/components/top-pick-card";
 import { Palette } from "@/constants/theme";
 
 type Profile = {
@@ -37,6 +40,7 @@ type DiaryEntry = {
       id: string;
       name: string;
       city: string | null;
+      brand_id: string | null;
     } | null;
   } | null;
 };
@@ -59,9 +63,11 @@ type RankedRestaurant = {
     id: string;
     name: string;
     city: string | null;
+    brand_id: string | null;
   } | null;
 };
 export default function ProfileScreen() {
+  const isPremium = useIsPremium();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [diary, setDiary] = useState<DiaryEntry[]>([]);
   const [topDishes, setTopDishes] = useState<RankedDish[]>([]);
@@ -119,7 +125,8 @@ export default function ProfileScreen() {
           restaurants (
             id,
             name,
-            city
+            city,
+            brand_id
           )
         )
       `,
@@ -183,7 +190,8 @@ export default function ProfileScreen() {
         restaurants (
           id,
           name,
-          city
+          city,
+          brand_id
         )
       `,
         )
@@ -241,6 +249,12 @@ export default function ProfileScreen() {
   function getProfilePhotoUrl(path: string) {
     const { data } = supabase.storage.from("profile-photos").getPublicUrl(path);
     return data.publicUrl;
+  }
+  // Top picks show the user's newest photo of that dish or restaurant.
+  const topPhotos = latestPhotoPaths(diary);
+  function getTopPhotoUrl(paths: Map<string, string>, id: string | undefined) {
+    const path = id ? paths.get(id) : undefined;
+    return path ? getPhotoUrl(path) : null;
   }
 
   function confirmSignOut() {
@@ -388,6 +402,17 @@ export default function ProfileScreen() {
 
       <ListsSection userId={profile.id} isOwner />
 
+      <TouchableOpacity
+        style={styles.compareButton}
+        activeOpacity={0.7}
+        onPress={() => router.push("/compare")}
+      >
+        <Text style={styles.compareTitle}>Which was better?</Text>
+        <Text style={styles.compareSubtext}>
+          Settle close calls between dishes and restaurants you rated the same
+        </Text>
+      </TouchableOpacity>
+
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Top Dishes</Text>
@@ -402,32 +427,17 @@ export default function ProfileScreen() {
         ) : (
           <View style={styles.featureGrid}>
             {topDishes.slice(0, 4).map((item) => (
-              <TouchableOpacity
+              <TopPickCard
                 key={item.id}
-                style={styles.featureCard}
-                activeOpacity={0.7}
+                rank={item.rank}
+                title={item.dishes?.name ?? "Unknown dish"}
+                subtitle={item.dishes?.restaurants?.name ?? "Unknown restaurant"}
+                photoUrl={getTopPhotoUrl(topPhotos.byDish, item.dishes?.id)}
                 onPress={() => {
-                  if (!item.dishes?.id) {
-                    return;
-                  }
-                  router.push({
-                    pathname: "/dish/[id]",
-                    params: {
-                      id: item.dishes.id,
-                    },
-                  });
+                  if (!item.dishes?.id) return;
+                  router.push({ pathname: "/dish/[id]", params: { id: item.dishes.id } });
                 }}
-              >
-                <View style={styles.rankBadge}>
-                  <Text style={styles.rankBadgeText}>#{item.rank}</Text>
-                </View>
-                <Text style={styles.featureName} numberOfLines={2}>
-                  {item.dishes?.name ?? "Unknown dish"}
-                </Text>
-                <Text style={styles.featureSubtext} numberOfLines={1}>
-                  {item.dishes?.restaurants?.name ?? "Unknown restaurant"}
-                </Text>
-              </TouchableOpacity>
+              />
             ))}
           </View>
         )}
@@ -446,36 +456,29 @@ export default function ProfileScreen() {
         ) : (
           <View style={styles.featureGrid}>
             {topRestaurants.slice(0, 4).map((item) => (
-              <TouchableOpacity
+              <TopPickCard
                 key={item.id}
-                style={styles.featureCard}
-                activeOpacity={0.7}
+                rank={item.rank}
+                title={item.restaurants?.name ?? "Unknown restaurant"}
+                subtitle={item.restaurants?.city ?? "Location unknown"}
+                photoUrl={getTopPhotoUrl(
+                  topPhotos.byRestaurant,
+                  item.restaurants?.brand_id ?? item.restaurants?.id,
+                )}
                 onPress={() => {
-                  if (!item.restaurants?.id) {
-                    return;
-                  }
+                  if (!item.restaurants?.id) return;
                   router.push({
                     pathname: "/restaurant/[id]",
-                    params: {
-                      id: item.restaurants.id,
-                    },
+                    params: { id: item.restaurants.id },
                   });
                 }}
-              >
-                <View style={styles.rankBadge}>
-                  <Text style={styles.rankBadgeText}>#{item.rank}</Text>
-                </View>
-                <Text style={styles.featureName} numberOfLines={2}>
-                  {item.restaurants?.name ?? "Unknown restaurant"}
-                </Text>
-                <Text style={styles.featureSubtext} numberOfLines={1}>
-                  {item.restaurants?.city ?? "Location unknown"}
-                </Text>
-              </TouchableOpacity>
+              />
             ))}
           </View>
         )}
       </View>
+      <RatingsChart userId={profile.id} />
+
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Recent Diary</Text>
@@ -533,7 +536,7 @@ export default function ProfileScreen() {
                         </Text>
                       </View>
                       <View style={styles.diaryRight}>
-                        <Text style={styles.rating}>{entry.rating}★</Text>
+                        <Text style={styles.rating}>{formatRating(entry.rating, isPremium)}★</Text>
                         <Text style={styles.dateText}>
                           {formatDate(entry.date_eaten)}
                         </Text>
@@ -733,6 +736,23 @@ const styles = StyleSheet.create({
     fontSize: 21,
     fontWeight: "700",
   },
+  compareButton: {
+    marginTop: 32,
+    borderWidth: 1,
+    borderColor: Palette.accent,
+    borderRadius: 14,
+    padding: 16,
+  },
+  compareTitle: {
+    color: Palette.text,
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  compareSubtext: {
+    color: Palette.textSecondary,
+    fontSize: 14,
+    marginTop: 4,
+  },
   rankLink: {
     fontSize: 14,
     fontWeight: "600",
@@ -740,41 +760,8 @@ const styles = StyleSheet.create({
   },
   featureGrid: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  featureCard: {
-    width: "48%",
-    minHeight: 118,
-    borderWidth: 1,
-    borderColor: Palette.border,
-    borderRadius: 14,
-    padding: 14,
-    justifyContent: "flex-start",
-  },
-  rankBadge: {
-    alignSelf: "flex-start",
-    backgroundColor: Palette.accent,
-    borderRadius: 7,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    marginBottom: 12,
-  },
-  rankBadgeText: {
-    color: Palette.text,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  featureName: {
-    color: Palette.text,
-    fontSize: 16,
-    fontWeight: "700",
-    lineHeight: 20,
-  },
-  featureSubtext: {
-    fontSize: 12,
-    color: Palette.textMuted,
-    marginTop: 5,
+    flexWrap: "nowrap",
+    gap: 8,
   },
   emptyCard: {
     borderWidth: 1,

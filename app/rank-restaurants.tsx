@@ -1,340 +1,156 @@
-import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-
+import { PickOption, TopPicksEditor } from '@/components/top-picks-editor';
 import { supabase } from '@/lib/supabase';
-import { Palette } from '@/constants/theme';
 
-type RestaurantOption = {
+type LocationRow = {
   id: string;
   name: string;
   city: string | null;
+  brand_id: string | null;
 };
 
-type SavedRanking = {
-  restaurant_id: string;
-  rank: number;
-};
-
-export default function RankRestaurantsScreen() {
-  const [restaurants, setRestaurants] = useState<RestaurantOption[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  useFocusEffect(
-    useCallback(() => {
-      loadRestaurants();
-    }, [])
-  );
-
-  async function loadRestaurants() {
-    setLoading(true);
-
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
-      setLoading(false);
-      Alert.alert('Error', 'No signed-in user found.');
-      return;
-    }
-
-    const { data: reviewData, error: reviewError } = await supabase
+// Every restaurant the user reviewed a dish at or rated, plus their saved
+// top 4. Restaurants are grouped by brand, so Chipotle shows up once however
+// many Chipotles they've been to; places without a brand are their location.
+async function loadRestaurantOptions(userId: string) {
+  const [reviewsResult, ratingsResult, rankingsResult] = await Promise.all([
+    supabase
       .from('reviews')
       .select(`
         dishes (
           restaurants (
             id,
             name,
-            city
+            city,
+            brand_id
           )
         )
       `)
-      .eq('user_id', user.id);
-
-    if (reviewError) {
-      setLoading(false);
-      Alert.alert('Error', reviewError.message);
-      return;
-    }
-
-    const uniqueMap = new Map<string, RestaurantOption>();
-
-    for (const row of reviewData ?? []) {
-      const restaurant =
-        (row.dishes as any)?.restaurants as RestaurantOption | null;
-
-      if (restaurant) {
-        uniqueMap.set(restaurant.id, restaurant);
-      }
-    }
-
-    setRestaurants(Array.from(uniqueMap.values()));
-
-    const { data: rankingData, error: rankingError } = await supabase
+      .eq('user_id', userId),
+    supabase
+      .from('restaurant_ratings')
+      .select(`
+        brand_id,
+        restaurants (
+          id,
+          name,
+          city,
+          brand_id
+        )
+      `)
+      .eq('user_id', userId),
+    supabase
       .from('restaurant_rankings')
-      .select('restaurant_id, rank')
-      .eq('user_id', user.id)
-      .order('rank', { ascending: true });
+      .select(`
+        rank,
+        restaurants (
+          id,
+          name,
+          city,
+          brand_id
+        )
+      `)
+      .eq('user_id', userId)
+      .order('rank', { ascending: true }),
+  ]);
 
-    setLoading(false);
+  if (reviewsResult.error) throw new Error(reviewsResult.error.message);
+  if (ratingsResult.error) throw new Error(ratingsResult.error.message);
+  if (rankingsResult.error) throw new Error(rankingsResult.error.message);
 
-    if (rankingError) {
-      Alert.alert('Ranking error', rankingError.message);
-      return;
-    }
+  // One location per brand (or per unbranded place). Ranked locations go
+  // first so re-saving keeps the location that was already saved.
+  const locations = new Map<string, LocationRow>();
+  const selectedKeys: string[] = [];
+  // Brand-wide ratings have no location yet.
+  const brandOnlyIds = new Set<string>();
 
-    const savedRankings = (rankingData ?? []) as SavedRanking[];
+  function addLocation(location: LocationRow | null) {
+    if (!location) return null;
 
-    setSelected(
-      savedRankings.map((item) => item.restaurant_id)
-    );
+    const key = location.brand_id ?? location.id;
+    if (!locations.has(key)) locations.set(key, location);
+
+    return key;
   }
 
-  function toggleRestaurant(id: string) {
-    setSelected((current) => {
-      if (current.includes(id)) {
-        return current.filter((restaurantId) => restaurantId !== id);
-      }
-
-      if (current.length >= 4) {
-        Alert.alert('Top 4 only', 'Choose up to 4 restaurants for now.');
-        return current;
-      }
-
-      return [...current, id];
-    });
+  for (const row of rankingsResult.data ?? []) {
+    const key = addLocation(row.restaurants as unknown as LocationRow | null);
+    if (key && !selectedKeys.includes(key)) selectedKeys.push(key);
   }
 
-  async function saveRankings() {
-    if (selected.length === 0) {
-      Alert.alert(
-        'No restaurants selected',
-        'Choose at least one restaurant.'
-      );
-      return;
-    }
-
-    setSaving(true);
-
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
-      setSaving(false);
-      Alert.alert('Error', 'No signed-in user found.');
-      return;
-    }
-
-    const { error: deleteError } = await supabase
-      .from('restaurant_rankings')
-      .delete()
-      .eq('user_id', user.id);
-
-    if (deleteError) {
-      setSaving(false);
-      Alert.alert('Error', deleteError.message);
-      return;
-    }
-
-    const rows = selected.map((restaurantId, index) => ({
-      user_id: user.id,
-      restaurant_id: restaurantId,
-      rank: index + 1,
-    }));
-
-    const { error: insertError } = await supabase
-      .from('restaurant_rankings')
-      .insert(rows);
-
-    setSaving(false);
-
-    if (insertError) {
-      Alert.alert('Error', insertError.message);
-      return;
-    }
-
-    Alert.alert('Saved', 'Your top restaurants were updated.');
+  for (const row of reviewsResult.data ?? []) {
+    const dish = row.dishes as unknown as {
+      restaurants: LocationRow | null;
+    } | null;
+    addLocation(dish?.restaurants ?? null);
   }
 
-  if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
+  for (const row of ratingsResult.data ?? []) {
+    if (row.brand_id) {
+      brandOnlyIds.add(row.brand_id);
+    } else {
+      addLocation(row.restaurants as unknown as LocationRow | null);
+    }
   }
 
-  return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Rank Top Restaurants</Text>
+  const missingBrandIds = [...brandOnlyIds].filter((id) => !locations.has(id));
+  const brandIds = [
+    ...new Set([
+      ...missingBrandIds,
+      ...[...locations.values()]
+        .map((location) => location.brand_id)
+        .filter((id): id is string => Boolean(id)),
+    ]),
+  ];
 
-      <Text style={styles.subtitle}>
-        Tap restaurants in the order you want them ranked.
-      </Text>
+  const brandNames = new Map<string, string>();
 
-      {selected.length > 0 ? (
-        <View style={styles.selectedBox}>
-          <Text style={styles.selectedTitle}>Your ranking</Text>
+  if (brandIds.length > 0) {
+    const [brandsResult, brandLocationsResult] = await Promise.all([
+      supabase.from('brands').select('id, name').in('id', brandIds),
+      missingBrandIds.length > 0
+        ? supabase
+            .from('restaurants')
+            .select('id, name, city, brand_id')
+            .in('brand_id', missingBrandIds)
+        : Promise.resolve({ data: [] as LocationRow[], error: null }),
+    ]);
 
-          {selected.map((id, index) => {
-            const restaurant = restaurants.find(
-              (item) => item.id === id
-            );
+    if (brandsResult.error) throw new Error(brandsResult.error.message);
+    if (brandLocationsResult.error) {
+      throw new Error(brandLocationsResult.error.message);
+    }
 
-            return (
-              <Text key={id} style={styles.selectedItem}>
-                {index + 1}.{' '}
-                {restaurant?.name ?? 'Unknown restaurant'}
-              </Text>
-            );
-          })}
-        </View>
-      ) : null}
+    for (const brand of brandsResult.data ?? []) {
+      brandNames.set(brand.id, brand.name);
+    }
 
-      {restaurants.map((restaurant) => {
-        const rankIndex = selected.indexOf(restaurant.id);
+    for (const location of brandLocationsResult.data ?? []) {
+      addLocation(location);
+    }
+  }
 
-        return (
-          <TouchableOpacity
-            key={restaurant.id}
-            style={[
-              styles.restaurantCard,
-              rankIndex !== -1 &&
-                styles.restaurantCardSelected,
-            ]}
-            onPress={() => toggleRestaurant(restaurant.id)}
-          >
-            <View style={styles.restaurantInfo}>
-              <Text style={styles.restaurantName}>
-                {restaurant.name}
-              </Text>
-
-              {restaurant.city ? (
-                <Text style={styles.city}>
-                  {restaurant.city}
-                </Text>
-              ) : null}
-            </View>
-
-            {rankIndex !== -1 ? (
-              <Text style={styles.rankNumber}>
-                #{rankIndex + 1}
-              </Text>
-            ) : null}
-          </TouchableOpacity>
-        );
-      })}
-
-      <TouchableOpacity
-        style={styles.button}
-        onPress={saveRankings}
-        disabled={saving}
-      >
-        <Text style={styles.buttonText}>
-          {saving ? 'Saving...' : 'Save Rankings'}
-        </Text>
-      </TouchableOpacity>
-    </ScrollView>
+  const options: PickOption[] = [...locations.entries()].map(
+    ([key, location]) => ({
+      key,
+      saveId: location.id,
+      name:
+        (location.brand_id && brandNames.get(location.brand_id)) ||
+        location.name,
+      subtitle: location.city,
+    })
   );
+
+  return { options, selectedKeys };
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    padding: 24,
-    paddingTop: 70,
-    paddingBottom: 40,
-    backgroundColor: Palette.background,
-  },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: Palette.background,
-  },
-  title: {
-    color: Palette.text,
-    fontSize: 30,
-    fontWeight: '700',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: Palette.textSecondary,
-    marginTop: 6,
-    marginBottom: 24,
-  },
-  selectedBox: {
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Palette.borderStrong,
-    borderRadius: 12,
-    marginBottom: 20,
-  },
-  selectedTitle: {
-    color: Palette.text,
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  selectedItem: {
-    color: Palette.text,
-    fontSize: 15,
-    marginTop: 4,
-  },
-  restaurantCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Palette.border,
-  },
-  restaurantCardSelected: {
-    backgroundColor: Palette.surface,
-  },
-  restaurantInfo: {
-    flex: 1,
-    paddingRight: 16,
-  },
-  restaurantName: {
-    color: Palette.text,
-    fontSize: 17,
-    fontWeight: '600',
-  },
-  city: {
-    fontSize: 14,
-    color: Palette.textSecondary,
-    marginTop: 3,
-  },
-  rankNumber: {
-    color: Palette.text,
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  button: {
-    backgroundColor: Palette.accent,
-    borderRadius: 10,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 24,
-  },
-  buttonText: {
-    color: Palette.text,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-});
+export default function RankRestaurantsScreen() {
+  return (
+    <TopPicksEditor
+      noun="restaurants"
+      rankingTable="restaurant_rankings"
+      idColumn="restaurant_id"
+      loadOptions={loadRestaurantOptions}
+    />
+  );
+}
