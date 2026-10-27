@@ -3,5 +3,7 @@
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",
     "source.sortMembers": "explicit"
-  }
+  },
+  // Edge functions run on Deno; the rest of the project stays on Node/TypeScript.
+  "deno.enablePaths": ["supabase/functions"]
 }

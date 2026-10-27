@@ -1,4 +1,5 @@
 import { formatRating, useIsPremium } from "@/lib/ratings";
+import { dishLabel } from "@/lib/dishes";
 import { supabase } from "@/lib/supabase";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
@@ -36,6 +37,7 @@ type DiaryEntry = {
   dishes: {
     id: string;
     name: string;
+    discontinued_at?: string | null;
     restaurants: {
       id: string;
       name: string;
@@ -50,6 +52,7 @@ type RankedDish = {
   dishes: {
     id: string;
     name: string;
+    discontinued_at?: string | null;
     restaurants: {
       id: string;
       name: string;
@@ -122,6 +125,7 @@ export default function ProfileScreen() {
         dishes (
           id,
           name,
+          discontinued_at,
           restaurants (
             id,
             name,
@@ -163,6 +167,7 @@ export default function ProfileScreen() {
         dishes (
           id,
           name,
+          discontinued_at,
           restaurants (
             id,
             name
@@ -430,7 +435,7 @@ export default function ProfileScreen() {
               <TopPickCard
                 key={item.id}
                 rank={item.rank}
-                title={item.dishes?.name ?? "Unknown dish"}
+                title={item.dishes ? dishLabel(item.dishes) : "Unknown dish"}
                 subtitle={item.dishes?.restaurants?.name ?? "Unknown restaurant"}
                 photoUrl={getTopPhotoUrl(topPhotos.byDish, item.dishes?.id)}
                 onPress={() => {
@@ -525,7 +530,7 @@ export default function ProfileScreen() {
                     <View style={styles.diaryTopRow}>
                       <View style={styles.diaryInfo}>
                         <Text style={styles.dishName}>
-                          {entry.dishes?.name ?? "Unknown dish"}
+                          {entry.dishes ? dishLabel(entry.dishes) : "Unknown dish"}
                         </Text>
                         <Text style={styles.restaurantName} numberOfLines={1}>
                           {entry.dishes?.restaurants?.name ??

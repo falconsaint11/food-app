@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { formatRating, useIsPremium } from '@/lib/ratings';
+import { dishLabel } from '@/lib/dishes';
 import { supabase } from '@/lib/supabase';
 import { Palette } from '@/constants/theme';
 
@@ -23,6 +24,7 @@ type DiaryEntry = {
   date_eaten: string;
   dishes: {
     name: string;
+    discontinued_at?: string | null;
     restaurants: {
       name: string;
       city: string | null;
@@ -65,6 +67,7 @@ export default function DiaryScreen() {
         date_eaten,
         dishes (
           name,
+          discontinued_at,
           restaurants (
             name,
             city
@@ -146,7 +149,7 @@ export default function DiaryScreen() {
               <View style={styles.topRow}>
                 <View style={styles.info}>
                   <Text style={styles.dishName}>
-                    {entry.dishes?.name ?? 'Unknown dish'}
+                    {entry.dishes ? dishLabel(entry.dishes) : 'Unknown dish'}
                   </Text>
 
                   <Text style={styles.restaurantName}>

@@ -19,6 +19,7 @@ import { RatingsChart } from '@/components/ratings-chart';
 import { latestPhotoPaths, TopPickCard } from '@/components/top-pick-card';
 import { fetchHiddenUserIds, unblockUser } from '@/lib/moderation';
 import { formatRating, useIsPremium } from '@/lib/ratings';
+import { dishLabel } from "@/lib/dishes";
 import { supabase } from '@/lib/supabase';
 import { Palette } from '@/constants/theme';
 
@@ -44,6 +45,8 @@ type RankedDish = {
     id: string;
 
     name: string;
+
+    discontinued_at?: string | null;
 
     restaurants: {
       id: string;
@@ -83,6 +86,8 @@ type DiaryEntry = {
     id: string;
 
     name: string;
+
+    discontinued_at?: string | null;
 
     restaurants: {
       id: string;
@@ -270,6 +275,8 @@ export default function UserProfileScreen() {
 
           name,
 
+          discontinued_at,
+
           restaurants (
 
             id,
@@ -378,6 +385,8 @@ export default function UserProfileScreen() {
           id,
 
           name,
+
+          discontinued_at,
 
           restaurants (
 
@@ -778,7 +787,7 @@ export default function UserProfileScreen() {
                 <TopPickCard
                   key={item.id}
                   rank={item.rank}
-                  title={item.dishes?.name ?? "Unknown dish"}
+                  title={item.dishes ? dishLabel(item.dishes) : "Unknown dish"}
                   subtitle={item.dishes?.restaurants?.name ?? "Unknown restaurant"}
                   photoUrl={getTopPhotoUrl(topPhotos.byDish, item.dishes?.id)}
                   onPress={() => {
@@ -872,7 +881,7 @@ export default function UserProfileScreen() {
                     <View style={styles.diaryTopRow}>
                       <View style={styles.diaryInfo}>
                         <Text style={styles.dishName}>
-                          {entry.dishes?.name ?? "Unknown dish"}
+                          {entry.dishes ? dishLabel(entry.dishes) : "Unknown dish"}
                         </Text>
 
                         <Text style={styles.restaurantName} numberOfLines={1}>

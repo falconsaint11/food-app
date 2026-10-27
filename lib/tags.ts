@@ -3,6 +3,9 @@ import { supabase } from '@/lib/supabase';
 export type Tag = {
   slug: string;
   label: string;
+  // Dietary tags (Gluten-Free, Vegan...) come after the food tags, then
+  // availability tags (Limited Time, Seasonal).
+  kind: 'food' | 'dietary' | 'availability';
 };
 
 // The tag list rarely changes, so load it once per app session.
@@ -13,7 +16,7 @@ export function fetchTags() {
     tagsPromise = (async () => {
       const { data, error } = await supabase
         .from('tags')
-        .select('slug, label')
+        .select('slug, label, kind')
         .order('sort_order');
 
       if (error) {

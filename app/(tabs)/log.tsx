@@ -25,6 +25,7 @@ import {
   LogDishCard,
 } from "@/components/log-dish-card";
 import { StarRatingInput } from "@/components/star-rating-input";
+import { useIsAdmin } from "@/lib/admin";
 import { getBrandLocationIds } from "@/lib/brands";
 import { supabase } from "@/lib/supabase";
 import { fetchTags, Tag } from "@/lib/tags";
@@ -228,6 +229,7 @@ export default function LogScreen() {
   const [allTags, setAllTags] = useState<Tag[]>([]);
 
   const [loading, setLoading] = useState(false);
+  const isAdmin = useIsAdmin();
 
   const googleSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -267,7 +269,12 @@ export default function LogScreen() {
   // A suggestion picked for one restaurant doesn't belong to another.
   function clearDishMatches() {
     setDishes((current) =>
-      current.map((dish) => ({ ...dish, matchedDish: null })),
+      current.map((dish) => ({
+        ...dish,
+        matchedDish: null,
+        variantParent: null,
+        newVariant: null,
+      })),
     );
   }
 
@@ -670,6 +677,7 @@ export default function LogScreen() {
     locationIds: string[],
     text: string,
     limit = 8,
+    includeDiscontinued = false,
   ) {
     const { data, error } = await supabase.rpc("search_dishes", {
       p_location_ids: locationIds,
@@ -679,6 +687,8 @@ export default function LogScreen() {
       p_current_restaurant_id: selectedRestaurantId,
 
       p_limit: limit,
+
+      p_include_discontinued: includeDiscontinued,
     });
 
     if (error) {
@@ -699,6 +709,39 @@ export default function LogScreen() {
       console.log("Dish search error:", error);
       return [];
     }
+  }
+
+  // A dish's variants across the brand, one per name, preferring this
+  // location's row.
+  async function loadVariants(parent: DishResult): Promise<DishResult[]> {
+    if (!parent.name_key || menuLocationIds.length === 0) {
+      return [];
+    }
+
+    const { data, error } = await supabase
+      .from("dishes")
+      .select("id, name, restaurant_id, name_key, variant_of, variant_label")
+      .in("restaurant_id", menuLocationIds)
+      .eq("variant_of", parent.name_key)
+      .is("discontinued_at", null);
+
+    if (error) {
+      console.log("Variants error:", error.message);
+      return [];
+    }
+
+    const byKey = new Map<string, DishResult>();
+
+    for (const dish of (data ?? []) as DishResult[]) {
+      const key = dish.name_key ?? dish.id;
+      if (!byKey.has(key) || dish.restaurant_id === selectedRestaurantId) {
+        byKey.set(key, dish);
+      }
+    }
+
+    return [...byKey.values()].sort((a, b) =>
+      (a.variant_label ?? a.name).localeCompare(b.variant_label ?? b.name),
+    );
   }
 
   function askAboutSimilarDish(match: DishResult, typedName: string) {
@@ -740,6 +783,12 @@ export default function LogScreen() {
 
       if (best?.is_exact) {
         return best;
+      }
+
+      // A new variant ("Steak Quesadilla") is close to its own dish by
+      // design, so don't ask "Did you mean Quesadilla?".
+      if (dish.newVariant) {
+        return null;
       }
 
       if (best && best.score >= SIMILAR_DISH_PROMPT_SCORE) {
@@ -827,10 +876,34 @@ export default function LogScreen() {
     return newRestaurant.id as string;
   }
 
+  // Admins can start a restaurant's menu from here, before anyone has logged
+  // a dish there. Saves the restaurant first so the import has somewhere to go.
+  async function openMenuImport() {
+    setLoading(true);
+
+    try {
+      const restaurantId = await findOrCreateRestaurant();
+
+      setSelectedRestaurantId(restaurantId);
+      router.push({
+        pathname: "/menu-import",
+        params: { restaurantId, restaurantName: restaurantName.trim() },
+      });
+    } catch (error) {
+      Alert.alert(
+        "Error",
+        error instanceof Error ? error.message : "Could not save restaurant.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function findOrCreateDish(
     restaurantId: string,
     dishName: string,
     match: DishResult | null,
+    newVariant: DishEntry["newVariant"],
   ) {
     // A dish matched at another location of the brand gets its own row here,
     // so the review stays tied to the location the user actually visited.
@@ -841,7 +914,8 @@ export default function LogScreen() {
     // Reuse the brand's existing name so the dish groups across locations.
     const name = match?.name ?? dishName;
 
-    const [existing] = await searchDishMatches([restaurantId], name, 1);
+    // Discontinued dishes count, so logging one doesn't create a duplicate.
+    const [existing] = await searchDishMatches([restaurantId], name, 1, true);
 
     if (existing?.is_exact) {
       return existing.id;
@@ -853,6 +927,11 @@ export default function LogScreen() {
         restaurant_id: restaurantId,
 
         name,
+
+        // A variant stays one at every location.
+        variant_of: match?.variant_of ?? newVariant?.of ?? null,
+
+        variant_label: match?.variant_label ?? newVariant?.label ?? null,
       })
       .select("id")
       .single();
@@ -889,7 +968,12 @@ export default function LogScreen() {
     dish: DishEntry,
     match: DishResult | null,
   ) {
-    const dishId = await findOrCreateDish(restaurantId, dish.name.trim(), match);
+    const dishId = await findOrCreateDish(
+      restaurantId,
+      dish.name.trim(),
+      match,
+      dish.newVariant,
+    );
 
     const photoPath = dish.photoUri
       ? await uploadPhoto(dish.photoUri, userId)
@@ -1416,6 +1500,14 @@ export default function LogScreen() {
               </TouchableOpacity>
             </View>
 
+            {isAdmin ? (
+              <TouchableOpacity onPress={openMenuImport} disabled={loading}>
+                <Text style={styles.menuImportLink}>
+                  Admin: add dishes from a menu photo
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+
             {manualRestaurant ? (
               <View style={styles.hereRow}>
                 <Text style={styles.hereText}>
@@ -1446,6 +1538,7 @@ export default function LogScreen() {
             entry={dish}
             allTags={allTags}
             onSearch={searchMenu}
+            onLoadVariants={loadVariants}
             onChange={(patch) => updateDish(dish.key, patch)}
             onRemove={dishes.length > 1 ? () => removeDish(dish.key) : undefined}
             disabled={loading}
@@ -1760,6 +1853,16 @@ const styles = StyleSheet.create({
     color: Palette.textMuted,
 
     marginTop: 3,
+  },
+
+  menuImportLink: {
+    fontSize: 14,
+
+    fontWeight: "600",
+
+    color: Palette.accent,
+
+    marginBottom: 12,
   },
 
   changeText: {

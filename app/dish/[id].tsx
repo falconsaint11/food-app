@@ -20,6 +20,7 @@ import {
   getBrandLocationIds,
   getBrandLocationsNearestFirst,
 } from '@/lib/brands';
+import { useIsAdmin } from '@/lib/admin';
 import { withoutHiddenUsers } from '@/lib/moderation';
 import { formatRating, useIsPremium } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
@@ -33,6 +34,11 @@ type Dish = {
   cover_review_id: string | null;
   category: string | null;
   price: number | null;
+  description: string | null;
+  options: string[] | null;
+  variant_of: string | null;
+  variant_label: string | null;
+  discontinued_at: string | null;
   restaurants: {
     id: string;
     name: string;
@@ -56,8 +62,16 @@ type DishReview = {
   } | null;
 };
 
+// The dish this one is a variant of, or one of its variants.
+type RelatedDish = {
+  id: string;
+  name: string;
+  label: string;
+};
+
 export default function DishDetailScreen() {
   const isPremium = useIsPremium();
+  const isAdmin = useIsAdmin();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [dish, setDish] = useState<Dish | null>(null);
@@ -66,6 +80,8 @@ export default function DishDetailScreen() {
   const [dishTags, setDishTags] = useState<Tag[]>([]);
   const [averageRating, setAverageRating] = useState(0);
   const [rankingCount, setRankingCount] = useState(0);
+  const [parentDish, setParentDish] = useState<RelatedDish | null>(null);
+  const [variants, setVariants] = useState<RelatedDish[]>([]);
   const [loading, setLoading] = useState(true);
 
   useFocusEffect(
@@ -90,6 +106,11 @@ export default function DishDetailScreen() {
         cover_review_id,
         category,
         price,
+        description,
+        options,
+        variant_of,
+        variant_label,
+        discontinued_at,
         restaurants (
           id,
           name,
@@ -119,6 +140,8 @@ export default function DishDetailScreen() {
     let sameDishIds = [dishRow.id];
     // A cover pinned on this dish at any location of the brand.
     let pinnedReviewId = dishRow.cover_review_id;
+    setParentDish(null);
+    setVariants([]);
 
     if (dishRow.restaurants) {
       try {
@@ -129,7 +152,9 @@ export default function DishDetailScreen() {
 
         const { data: siblingData, error: siblingError } = await supabase
           .from('dishes')
-          .select('id, name_key, cover_review_id')
+          .select(
+            'id, name, name_key, restaurant_id, cover_review_id, variant_of, variant_label, discontinued_at'
+          )
           .in('restaurant_id', locationIds);
 
         if (siblingError) throw new Error(siblingError.message);
@@ -139,6 +164,39 @@ export default function DishDetailScreen() {
         );
 
         sameDishIds = sameDishes.map((sibling) => sibling.id as string);
+
+        // One row per dish name, preferring this location's.
+        const related = new Map<string, RelatedDish>();
+
+        for (const sibling of siblingData ?? []) {
+          const isParent = sibling.name_key === dishRow.variant_of;
+          const isVariant =
+            sibling.variant_of === dishRow.name_key && !sibling.discontinued_at;
+
+          if (!isParent && !isVariant) continue;
+          if (
+            related.has(sibling.name_key) &&
+            sibling.restaurant_id !== dishRow.restaurants.id
+          ) {
+            continue;
+          }
+
+          related.set(sibling.name_key, {
+            id: sibling.id,
+            name: sibling.name,
+            label: isParent ? sibling.name : (sibling.variant_label ?? sibling.name),
+          });
+        }
+
+        setParentDish(
+          dishRow.variant_of ? (related.get(dishRow.variant_of) ?? null) : null
+        );
+        setVariants(
+          [...related.entries()]
+            .filter(([key]) => key !== dishRow.variant_of)
+            .map(([, variant]) => variant)
+            .sort((a, b) => a.label.localeCompare(b.label))
+        );
         pinnedReviewId =
           pinnedReviewId ??
           sameDishes.find((sibling) => sibling.cover_review_id)
@@ -273,6 +331,26 @@ export default function DishDetailScreen() {
           {dish.name}
         </Text>
 
+        {dish.discontinued_at || isAdmin ? (
+          <View style={styles.statusRow}>
+            {dish.discontinued_at ? (
+              <View style={styles.discontinuedBadge}>
+                <Text style={styles.discontinuedText}>Discontinued</Text>
+              </View>
+            ) : null}
+
+            {isAdmin ? (
+              <TouchableOpacity
+                onPress={() =>
+                  router.push({ pathname: '/dish-edit', params: { id: dish.id } })
+                }
+              >
+                <Text style={styles.editLink}>Edit</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
+
         {dish.restaurants ? (
           <TouchableOpacity
             onPress={() =>
@@ -288,14 +366,60 @@ export default function DishDetailScreen() {
           </TouchableOpacity>
         ) : null}
 
+        {parentDish ? (
+          <TouchableOpacity
+            onPress={() =>
+              router.push({ pathname: '/dish/[id]', params: { id: parentDish.id } })
+            }
+          >
+            <Text style={styles.relatedText}>
+              A version of <Text style={styles.relatedLink}>{parentDish.name}</Text>
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {variants.length > 0 ? (
+          <View style={styles.variantRow}>
+            <Text style={styles.relatedText}>Variants:</Text>
+            {variants.map((variant) => (
+              <TouchableOpacity
+                key={variant.id}
+                style={styles.tag}
+                onPress={() =>
+                  router.push({ pathname: '/dish/[id]', params: { id: variant.id } })
+                }
+              >
+                <Text style={styles.tagText}>{variant.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
+
         {dishTags.length > 0 ? (
           <View style={styles.tagRow}>
             {dishTags.map((tag) => (
-              <View key={tag.slug} style={styles.tag}>
-                <Text style={styles.tagText}>{tag.label}</Text>
+              <View
+                key={tag.slug}
+                style={[styles.tag, tag.kind === 'dietary' && styles.dietaryTag]}
+              >
+                <Text
+                  style={[
+                    styles.tagText,
+                    tag.kind === 'dietary' && styles.dietaryTagText,
+                  ]}
+                >
+                  {tag.label}
+                </Text>
               </View>
             ))}
           </View>
+        ) : null}
+
+        {dishTags.some((tag) => tag.kind === 'dietary') ? (
+          <Text style={styles.dietaryNote}>
+            Dietary tags come from the menu and diners. Confirm with the
+            restaurant if you have an allergy.
+          </Text>
         ) : null}
 
         <View style={styles.actions}>
@@ -352,6 +476,20 @@ export default function DishDetailScreen() {
             </Text>
           </View>
         </View>
+
+        {dish.description || dish.options?.length ? (
+          <View style={styles.details}>
+            {dish.description ? (
+              <Text style={styles.detailText}>{dish.description}</Text>
+            ) : null}
+
+            {dish.options?.length ? (
+              <Text style={styles.detailText}>
+                Options: {dish.options.join(' · ')}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {dish.category || dish.price !== null ? (
           <View style={styles.details}>
@@ -458,6 +596,45 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 6,
   },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 8,
+  },
+  discontinuedBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Palette.textMuted,
+  },
+  discontinuedText: {
+    color: Palette.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  editLink: {
+    color: Palette.accent,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  relatedText: {
+    color: Palette.textSecondary,
+    fontSize: 14,
+    marginTop: 8,
+  },
+  relatedLink: {
+    color: Palette.accent,
+    fontWeight: '600',
+  },
+  variantRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
   // Equal-width buttons sharing one row, so they line up on any screen.
   tagRow: {
     flexDirection: 'row',
@@ -475,6 +652,19 @@ const styles = StyleSheet.create({
     color: Palette.textSecondary,
     fontSize: 12,
     fontWeight: '600',
+  },
+  dietaryTag: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: Palette.accent,
+  },
+  dietaryTagText: {
+    color: Palette.accent,
+  },
+  dietaryNote: {
+    color: Palette.textMuted,
+    fontSize: 12,
+    marginTop: 6,
   },
   actions: {
     flexDirection: 'row',

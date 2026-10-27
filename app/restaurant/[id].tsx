@@ -22,6 +22,7 @@ import {
   getBrandLocationIds,
   getBrandLocationsNearestFirst,
 } from '@/lib/brands';
+import { useIsAdmin } from '@/lib/admin';
 import { withoutHiddenUsers } from '@/lib/moderation';
 import { formatRating, useIsPremium } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
@@ -40,8 +41,14 @@ type Restaurant = {
 type DishSummary = {
   id: string;
   name: string;
+  nameKey: string;
   averageRating: number;
   reviewCount: number;
+  // Set on variants: the name_key of the dish listed above them.
+  variantOf: string | null;
+  variantLabel: string | null;
+  // Every location's row is discontinued.
+  discontinued: boolean;
 };
 
 type RecentReview = {
@@ -77,6 +84,7 @@ const RESTAURANT_NOTE_COUNT = 5;
 
 export default function RestaurantDetailScreen() {
   const isPremium = useIsPremium();
+  const isAdmin = useIsAdmin();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
@@ -88,6 +96,7 @@ export default function RestaurantDetailScreen() {
   const [myVisitCount, setMyVisitCount] = useState(0);
   const [restaurantNotes, setRestaurantNotes] = useState<RestaurantNote[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showDiscontinued, setShowDiscontinued] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -227,7 +236,7 @@ export default function RestaurantDetailScreen() {
 
       const { data: dishData, error: dishError } = await supabase
         .from('dishes')
-        .select('id, name, name_key')
+        .select('id, name, name_key, variant_of, variant_label, discontinued_at')
         .in('restaurant_id', locationIds);
 
       if (dishError) throw new Error(dishError.message);
@@ -281,7 +290,15 @@ export default function RestaurantDetailScreen() {
       // The most-reviewed row is the one the menu links to.
       const groups = new Map<
         string,
-        { id: string; name: string; topCount: number; ratings: number[] }
+        {
+          id: string;
+          name: string;
+          topCount: number;
+          ratings: number[];
+          variantOf: string | null;
+          variantLabel: string | null;
+          discontinued: boolean;
+        }
       >();
 
       for (const dish of dishData ?? []) {
@@ -295,21 +312,31 @@ export default function RestaurantDetailScreen() {
             name: dish.name.trim(),
             topCount: ratings.length,
             ratings: [...ratings],
+            variantOf: dish.variant_of,
+            variantLabel: dish.variant_label,
+            discontinued: dish.discontinued_at !== null,
           });
           continue;
         }
 
         group.ratings.push(...ratings);
+        group.variantOf ??= dish.variant_of;
+        group.variantLabel ??= dish.variant_label;
+        group.discontinued &&= dish.discontinued_at !== null;
         if (ratings.length > group.topCount) {
           group.id = dish.id;
           group.topCount = ratings.length;
         }
       }
 
-      const dishSummaries: DishSummary[] = [...groups.values()].map(
-        (group) => ({
+      const dishSummaries: DishSummary[] = [...groups.entries()].map(
+        ([nameKey, group]) => ({
           id: group.id,
           name: group.name,
+          nameKey,
+          variantOf: group.variantOf,
+          variantLabel: group.variantLabel,
+          discontinued: group.discontinued,
           reviewCount: group.ratings.length,
           averageRating:
             group.ratings.length > 0
@@ -364,11 +391,27 @@ export default function RestaurantDetailScreen() {
     }
   }
 
-  function renderDishRow(dish: DishSummary) {
+  // A variant row (under its dish) shows just its label ("Steak"). A dish
+  // with variants shows the combined rating of it and its variants.
+  function renderDishRow(
+    dish: DishSummary,
+    options: { asVariant?: boolean; variants?: DishSummary[] } = {}
+  ) {
+    const family = [dish, ...(options.variants ?? [])];
+    const reviewCount = family.reduce((sum, item) => sum + item.reviewCount, 0);
+    const averageRating =
+      reviewCount > 0
+        ? family.reduce(
+            (sum, item) => sum + item.averageRating * item.reviewCount,
+            0
+          ) / reviewCount
+        : 0;
+    const variantCount = options.variants?.length ?? 0;
+
     return (
       <TouchableOpacity
         key={dish.id}
-        style={styles.dishRow}
+        style={[styles.dishRow, options.asVariant && styles.variantRow]}
         onPress={() =>
           router.push({
             pathname: '/dish/[id]',
@@ -377,18 +420,20 @@ export default function RestaurantDetailScreen() {
         }
       >
         <View style={styles.dishInfo}>
-          <Text style={styles.dishName}>{dish.name}</Text>
+          <Text style={[styles.dishName, options.asVariant && styles.variantName]}>
+            {options.asVariant ? (dish.variantLabel ?? dish.name) : dish.name}
+          </Text>
 
           <Text style={styles.dishSubtext}>
-            {dish.reviewCount}{' '}
-            {dish.reviewCount === 1 ? 'review' : 'reviews'}
+            {reviewCount} {reviewCount === 1 ? 'review' : 'reviews'}
+            {variantCount > 0
+              ? ` · ${variantCount} ${variantCount === 1 ? 'variant' : 'variants'}`
+              : ''}
           </Text>
         </View>
 
         <Text style={styles.dishRating}>
-          {dish.averageRating > 0
-            ? `${dish.averageRating.toFixed(1)} ★`
-            : '—'}
+          {averageRating > 0 ? `${averageRating.toFixed(1)} ★` : '—'}
         </Text>
       </TouchableOpacity>
     );
@@ -412,7 +457,15 @@ export default function RestaurantDetailScreen() {
     );
   }
 
-  const topItems = dishes
+  // Variants are listed under their dish when it's on the menu; ones whose
+  // dish isn't are listed on their own.
+  const onMenu = dishes.filter((dish) => !dish.discontinued);
+  const discontinued = dishes.filter((dish) => dish.discontinued);
+  const menuKeys = new Set(onMenu.map((dish) => dish.nameKey));
+  const variantsOf = (dish: DishSummary) =>
+    onMenu.filter((variant) => variant.variantOf === dish.nameKey);
+
+  const topItems = onMenu
     .filter((dish) => dish.reviewCount > 0)
     .sort((a, b) => {
       if (b.averageRating !== a.averageRating) {
@@ -485,21 +538,66 @@ export default function RestaurantDetailScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Top Items</Text>
 
-            {topItems.map(renderDishRow)}
+            {topItems.map((dish) => renderDishRow(dish))}
           </View>
         ) : null}
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Menu</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Menu</Text>
+            {/* Menu import is for getting a restaurant started. */}
+            {isAdmin && dishes.length < 10 ? (
+              <TouchableOpacity
+                onPress={() =>
+                  router.push({
+                    pathname: '/menu-import',
+                    params: {
+                      restaurantId: restaurant.id,
+                      restaurantName: restaurant.brands?.name ?? restaurant.name,
+                    },
+                  })
+                }
+              >
+                <Text style={styles.sectionLink}>Add from menu</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
 
-          {dishes.length === 0 ? (
+          {onMenu.length === 0 ? (
             <Text style={styles.emptyText}>
               No dishes logged yet.
             </Text>
           ) : (
-            dishes.map(renderDishRow)
+            onMenu
+              .filter((dish) => !dish.variantOf || !menuKeys.has(dish.variantOf))
+              .map((dish) => {
+                const variants = variantsOf(dish);
+
+                return (
+                  <View key={dish.id}>
+                    {renderDishRow(dish, { variants })}
+                    {variants.map((variant) =>
+                      renderDishRow(variant, { asVariant: true })
+                    )}
+                  </View>
+                );
+              })
           )}
         </View>
+
+        {discontinued.length > 0 ? (
+          <View style={styles.section}>
+            <TouchableOpacity onPress={() => setShowDiscontinued((open) => !open)}>
+              <Text style={styles.discontinuedToggle}>
+                {showDiscontinued ? '− ' : '+ '}Discontinued ({discontinued.length})
+              </Text>
+            </TouchableOpacity>
+
+            {showDiscontinued
+              ? discontinued.map((dish) => renderDishRow(dish))
+              : null}
+          </View>
+        ) : null}
 
         {restaurantNotes.length > 0 ? (
           <View style={styles.section}>
@@ -686,6 +784,16 @@ const styles = StyleSheet.create({
   section: {
     marginTop: 30,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+  },
+  sectionLink: {
+    color: Palette.accent,
+    fontSize: 14,
+    fontWeight: '600',
+  },
   sectionTitle: {
     color: Palette.text,
     fontSize: 21,
@@ -703,6 +811,19 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: Palette.border,
+  },
+  variantRow: {
+    paddingLeft: 20,
+    paddingVertical: 10,
+  },
+  variantName: {
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  discontinuedToggle: {
+    color: Palette.textSecondary,
+    fontSize: 16,
+    fontWeight: '600',
   },
   dishInfo: {
     flex: 1,

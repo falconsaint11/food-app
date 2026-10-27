@@ -20,6 +20,16 @@ export type DishResult = {
   name: string;
 
   restaurant_id: string;
+
+  name_key?: string;
+
+  // Set on variants: the name_key of the dish it's a version of.
+  variant_of?: string | null;
+
+  variant_label?: string | null;
+
+  // The dish has variants or add-on options, so ask "Which one?".
+  has_choices?: boolean;
 };
 
 // One dish in a visit being logged.
@@ -31,6 +41,13 @@ export type DishEntry = {
   // The existing dish picked from suggestions (possibly at another location
   // of the brand), or null to match/create by name when saving.
   matchedDish: DishResult | null;
+
+  // The picked dish when it has variants, so the "Which one?" row stays up
+  // after choosing one.
+  variantParent: DishResult | null;
+
+  // A variant typed in with "+ New" ("Steak" of Quesadilla), created on save.
+  newVariant: { of: string; label: string } | null;
 
   rating: number;
 
@@ -49,6 +66,8 @@ export function createDishEntry(name = ""): DishEntry {
     key: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     name,
     matchedDish: null,
+    variantParent: null,
+    newVariant: null,
     rating: 0,
     notes: "",
     photoUri: null,
@@ -65,6 +84,9 @@ type LogDishCardProps = {
   // Brand-wide fuzzy menu search; empty until a restaurant is picked.
   onSearch: (text: string) => Promise<DishResult[]>;
 
+  // The dish's variants on this restaurant's menu.
+  onLoadVariants: (parent: DishResult) => Promise<DishResult[]>;
+
   onChange: (patch: Partial<DishEntry>) => void;
 
   // Omitted for the only card, which can't be removed.
@@ -77,11 +99,17 @@ export function LogDishCard({
   entry,
   allTags,
   onSearch,
+  onLoadVariants,
   onChange,
   onRemove,
   disabled,
 }: LogDishCardProps) {
   const [results, setResults] = useState<DishResult[]>([]);
+
+  const [variants, setVariants] = useState<DishResult[]>([]);
+
+  // The "+ New" variant being typed, or null when the input is closed.
+  const [variantDraft, setVariantDraft] = useState<string | null>(null);
 
   const [expanded, setExpanded] = useState(
     Boolean(entry.notes || entry.photoUri),
@@ -115,6 +143,8 @@ export function LogDishCard({
     onChange({
       name: text,
       matchedDish: null,
+      variantParent: null,
+      newVariant: null,
       // Clearing the dish starts tagging over.
       ...(text.trim().length < 2 ? { tags: [], tagsTouched: false } : {}),
     });
@@ -127,9 +157,42 @@ export function LogDishCard({
     setResults(await onSearch(text.trim()));
   }
 
-  function pickSuggestion(dish: DishResult) {
-    onChange({ name: dish.name, matchedDish: dish });
+  async function pickSuggestion(dish: DishResult) {
+    onChange({
+      name: dish.name,
+      matchedDish: dish,
+      variantParent: dish.has_choices ? dish : null,
+      newVariant: null,
+    });
     setResults([]);
+    setVariants([]);
+    setVariantDraft(null);
+
+    if (dish.has_choices) {
+      setVariants(await onLoadVariants(dish));
+    }
+  }
+
+  function pickVariant(variant: DishResult | null) {
+    const parent = entry.variantParent;
+    if (!parent) return;
+
+    const dish = variant ?? parent;
+    onChange({ name: dish.name, matchedDish: dish, newVariant: null });
+    setVariantDraft(null);
+  }
+
+  function addVariant() {
+    const parent = entry.variantParent;
+    const label = variantDraft?.trim();
+    if (!parent?.name_key || !label) return;
+
+    onChange({
+      name: `${label} ${parent.name}`,
+      matchedDish: null,
+      newVariant: { of: parent.name_key, label },
+    });
+    setVariantDraft(null);
   }
 
   function toggleTag(slug: string) {
@@ -208,8 +271,78 @@ export function LogDishCard({
         </View>
       ) : null}
 
-      {entry.matchedDish ? (
+      {entry.matchedDish && !entry.variantParent ? (
         <Text style={styles.onMenuText}>✓ On the menu</Text>
+      ) : null}
+
+      {entry.variantParent ? (
+        <View style={styles.variantBox}>
+          <Text style={styles.variantPrompt}>Which one?</Text>
+
+          <View style={styles.tagChips}>
+            {[null, ...variants].map((variant) => {
+              const selected =
+                !entry.newVariant &&
+                entry.matchedDish?.name_key ===
+                  (variant ?? entry.variantParent)?.name_key;
+
+              return (
+                <TouchableOpacity
+                  key={variant?.id ?? "plain"}
+                  style={[styles.tagChip, selected && styles.tagChipSelected]}
+                  onPress={() => pickVariant(variant)}
+                  disabled={disabled}
+                >
+                  <Text
+                    style={[
+                      styles.tagChipText,
+                      selected && styles.tagChipTextSelected,
+                    ]}
+                  >
+                    {variant ? (variant.variant_label ?? variant.name) : "Plain"}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+
+            {entry.newVariant ? (
+              <View style={[styles.tagChip, styles.tagChipSelected]}>
+                <Text style={[styles.tagChipText, styles.tagChipTextSelected]}>
+                  {entry.newVariant.label}
+                </Text>
+              </View>
+            ) : null}
+
+            {variantDraft === null ? (
+              <TouchableOpacity
+                style={styles.tagChip}
+                onPress={() => setVariantDraft("")}
+                disabled={disabled}
+              >
+                <Text style={styles.tagChipText}>+ New</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          {variantDraft !== null ? (
+            <View style={styles.variantInputRow}>
+              <TextInput
+                style={styles.variantInput}
+                placeholder="Like Steak or Mango"
+                placeholderTextColor={Palette.textMuted}
+                value={variantDraft}
+                onChangeText={setVariantDraft}
+                onSubmitEditing={addVariant}
+                maxLength={40}
+                autoFocus
+              />
+
+              <TouchableOpacity onPress={addVariant}>
+                <Text style={styles.variantAddText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </View>
       ) : null}
 
       <StarRatingInput
@@ -294,6 +427,56 @@ export function LogDishCard({
 }
 
 const styles = StyleSheet.create({
+  variantBox: {
+    marginBottom: 10,
+  },
+
+  variantPrompt: {
+    fontSize: 14,
+
+    fontWeight: "600",
+
+    color: Palette.textSecondary,
+
+    marginBottom: 6,
+  },
+
+  variantInputRow: {
+    flexDirection: "row",
+
+    alignItems: "center",
+
+    gap: 12,
+
+    marginTop: 8,
+  },
+
+  variantInput: {
+    flex: 1,
+
+    borderWidth: 1,
+
+    borderColor: Palette.borderStrong,
+
+    borderRadius: 10,
+
+    paddingHorizontal: 12,
+
+    paddingVertical: 8,
+
+    fontSize: 15,
+
+    color: Palette.text,
+  },
+
+  variantAddText: {
+    fontSize: 15,
+
+    fontWeight: "600",
+
+    color: Palette.accent,
+  },
+
   card: {
     borderWidth: 1,
 

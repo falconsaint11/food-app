@@ -132,6 +132,7 @@ export default function RootLayout() {
           name="rank-restaurants"
           options={{ title: "Top Restaurants" }}
         />
+        <Stack.Screen name="dish-edit" options={{ title: "Edit Dish" }} />
       </Stack>
       <StatusBar style="light" />
     </ThemeProvider>

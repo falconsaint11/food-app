@@ -19,6 +19,7 @@ import {
 import { ContentMenu } from "@/components/content-menu";
 import { fetchHiddenUserIds, withoutHiddenUsers } from "@/lib/moderation";
 import { formatRating, useIsPremium } from "@/lib/ratings";
+import { dishLabel } from '@/lib/dishes';
 import { supabase } from "@/lib/supabase";
 import { Palette } from "@/constants/theme";
 
@@ -47,6 +48,8 @@ type Review = {
     id: string;
 
     name: string;
+
+    discontinued_at?: string | null;
 
     restaurants: {
       id: string;
@@ -169,6 +172,8 @@ export default function ReviewDetailScreen() {
             id,
 
             name,
+
+            discontinued_at,
 
             restaurants (
 
@@ -793,7 +798,7 @@ export default function ReviewDetailScreen() {
                     })
                   }
                 >
-                  <Text style={styles.dishLink}>{review.dishes.name}</Text>
+                  <Text style={styles.dishLink}>{dishLabel(review.dishes)}</Text>
                 </TouchableOpacity>
               ) : (
                 <Text style={styles.dishName}>Unknown dish</Text>

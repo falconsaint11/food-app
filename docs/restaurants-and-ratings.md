@@ -169,6 +169,107 @@ on Discover.
   review can't beat a dish many people rated 4.6★.
 - **Dish page:** shows the dish's public tags under its name.
 
+### Dietary tags
+
+Gluten-Free, Gluten-Friendly, Dairy-Free, Vegetarian and Vegan are tags with
+`kind = 'dietary'`. They work like other tags (votes, Discover chips) and
+show outlined on the dish page with a note to confirm allergies with the
+restaurant. Gluten-Friendly means the menu says gluten-friendly or "can be
+made gluten-free", where cross-contact is possible.
+
+### Limited Time, Seasonal and Secret Menu
+
+`limited-time`, `seasonal` and `secret-menu` are tags with
+`kind = 'availability'`. Secret Menu is for things you have to know to order
+(In-N-Out's Animal Style). The
+menu reader only adds them when the menu marks the dish (LTO, "limited
+time", a "Fall Menu" section), and people can vote them on like any tag.
+There are no per-season tags: a "Fall" chip would show all year in
+Discover.
+
+## Variants
+
+"Steak Quesadilla" can be a variant of "Quesadilla": its own dish with its
+own ratings and photos, with `dishes.variant_of` = the Quesadilla's
+`name_key` and `variant_label` = 'Steak'. Linking by `name_key` makes it work
+at every location of the brand.
+
+- **Restaurant page:** variants are listed under their dish by label, and
+  the dish shows the combined rating. A variant whose dish isn't on the menu
+  is listed on its own.
+- **Dish page:** a variant links to its dish ("A version of Quesadilla");
+  a dish lists its variants.
+- **Log tab:** picking a dish with variants or options asks "Which one?":
+  Plain, each variant, or **+ New** to type one ("Steak" logs "Steak
+  Quesadilla"). That's how variants the menu doesn't name get added.
+- **Menu import:** creates variants when the menu names them.
+
+## Discontinued dishes
+
+Dishes the restaurant no longer serves get `dishes.discontinued_at`. Nothing
+is deleted: they leave the menu (listed under a collapsed **Discontinued**
+section at the bottom of the restaurant page) and Log tab suggestions, and
+show "· Discontinued" on dish pages, profiles, top 4s, the diary and reviews.
+Logging one by its exact name still uses the existing dish. A menu import
+that finds the dish again un-discontinues it.
+
+## Editing a dish (admins)
+
+Admins see **Edit** on dish pages (`app/dish-edit.tsx`, `admin_update_dish()`):
+name, description, options, variant (search the menu for the dish it's a
+version of, plus its label), and Discontinued. All of these apply at every
+location of the brand; price applies only to the location the page shows.
+Renaming to a name already on the menu is refused; merge the two dishes
+instead. Discontinuing a dish discontinues its variants too.
+
+Description, options, variant links and discontinued are protected by a
+trigger: regular users can only set a variant link when they create a dish
+while logging.
+
+## Adding dishes from a menu photo
+
+Menu import is for getting a restaurant started. Admins (rows in
+`app_admins`) see **Add from menu** next to Menu on a restaurant page
+(`app/menu-import.tsx`) while it lists fewer than 10 dishes (same-named
+dishes across the brand's locations count once). `import_menu_dishes()`
+refuses at 10 or more as well. For a restaurant nobody has logged yet, pick it in
+the Log tab and tap **Admin: add dishes from a menu photo**, which saves the
+restaurant and opens the same screen.
+
+1. Take or choose photos of the menu, one page each.
+2. Each photo goes to the `menu-scan` edge function
+   (`supabase/functions/menu-scan/index.ts`), which asks Claude Opus 5.5 for
+   every dish with its price, section, description, options and tags.
+   Dietary tags are only added when the menu itself marks the dish.
+3. Review the list: untick mistakes, fix names and prices, change tags.
+4. **Add N dishes** calls `import_menu_dishes()`. Dishes go on the location
+   the page was opened from. A dish whose `name_key` is already on that
+   location's menu isn't duplicated; it gets the tags, plus the price and
+   section if it had none.
+
+Each menu item is one dish, even when it comes with choices: "Quesadilla,
+add protein +$3" is one Quesadilla, not one dish per protein. The text
+printed with it goes in `dishes.description` and the choices ("Add protein
++$3", "Soft or crunchy", "Small $3.25 / Big $6") in `dishes.options`, both
+shown on the dish page. Choices printed for a whole section (any taco soft or
+crunchy) go on every dish in it. Upgrades for every item on the menu are
+skipped. Flavors or proteins the menu names (margaritas in mango or
+strawberry) come back as variants, each saved as its own dish (see below).
+
+Tags from a menu are stored in `dish_menu_tags` and show publicly right away,
+without the 2-person rule.
+
+Each photo costs roughly 5-10 cents of Claude usage. Setup:
+
+```sh
+supabase functions deploy menu-scan
+supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+```
+
+```sql
+insert into app_admins (user_id) values ('<user id>');
+```
+
 ## Cover photos
 
 Restaurant and dish pages show the top 5 review photos as a swipeable strip
@@ -214,8 +315,8 @@ their ranking numbers.
 
 ## Migrations
 
-Run in order in the Supabase SQL editor. All except `20261031000000_report_and_block.sql`
-have already been run on the shared project.
+Run in order in the Supabase SQL editor. All except `20261031000000_report_and_block.sql` have already been run on the shared
+project.
 
 | File | What it does |
 |---|---|
@@ -232,6 +333,7 @@ have already been run on the shared project.
 | `20261030000000_delete_my_account.sql` | `delete_my_account()` and a storage rule letting users delete their own photo folders |
 | `20261031000000_report_and_block.sql` | `reports` and `blocks` tables, `block_user()`, `my_hidden_user_ids()`, triggers refusing follows/comments/tags between blocked users |
 | `20261101000000_rating_comparisons.sql` | Two-decimal ratings, `premium_members`, `rating_comparisons`, `compare_ratings()`, and the Premium check on exact scores |
+| `20261102000000_menu_import.sql` | Dietary tags (`tags.kind`), `app_admins`, `dish_menu_tags`, `import_menu_dishes()`, and menu tags counting in `dish_public_tags()` / `top_dishes_by_tag()` / `merge_dishes()` |
 
 Don't add a foreign key from `dishes` to `reviews`. `reviews.dish_id` already
 links them, and a second link breaks every `reviews … dishes (…)` query.
@@ -290,3 +392,6 @@ Required by the App Store for apps where people post content.
   viewer's permissions, so private reviews can make covers differ per person.
 - **No photo moderation** yet. Ideas: a "Report photo" option, or automatic
   checks for non-food photos.
+| `20261103000000_menu_options.sql` | `dishes.description` / `options`, and `import_menu_dishes()` saving them and refusing restaurants with 10+ dishes |
+| `20261104000000_availability_tags.sql` | `availability` tag kind with Limited Time and Seasonal |
+| `20261105000000_variants_and_discontinued.sql` | `dishes.variant_of` / `variant_label` / `discontinued_at`, Secret Menu tag, admin-column trigger, `search_dishes()` skipping discontinued and flagging choices, `admin_update_dish()`, and `import_menu_dishes()` creating variants |
