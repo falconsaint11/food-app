@@ -13,19 +13,23 @@ import {
 } from 'react-native';
 
 import { Palette } from '@/constants/theme';
+import { useIsAdmin } from '@/lib/admin';
 import { getBrandLocationIds } from '@/lib/brands';
 import { supabase } from '@/lib/supabase';
+import { fetchDishPublicTags, fetchTags, Tag } from '@/lib/tags';
 
 type MenuDish = {
   name: string;
   nameKey: string;
 };
 
-// Admin tool: fix a dish's name, price, description and options, make it a
-// variant of another dish, or mark it discontinued. Everything but price
-// applies at every location of the brand (see admin_update_dish()).
+// Curator tool: fix a dish's name, price, description, options and tags, or
+// make it a variant of another dish. Admins can also mark it discontinued.
+// Everything but price applies at every location of the brand (see
+// admin_update_dish() and set_dish_tag()).
 export default function DishEditScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const isAdmin = useIsAdmin();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -40,6 +44,9 @@ export default function DishEditScreen() {
   const [parentSearch, setParentSearch] = useState('');
   const [discontinued, setDiscontinued] = useState(false);
   const [menu, setMenu] = useState<MenuDish[]>([]);
+  const [allTags, setAllTags] = useState<Tag[]>([]);
+  const [tagSlugs, setTagSlugs] = useState<string[]>([]);
+  const [savingTag, setSavingTag] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -81,8 +88,19 @@ export default function DishEditScreen() {
 
         const { data: menuData } = await supabase
           .from('dishes')
-          .select('name, name_key, variant_of')
+          .select('id, name, name_key, variant_of')
           .in('restaurant_id', locationIds);
+
+        // Tags count across every location's row of this dish.
+        const sameDishIds = (menuData ?? [])
+          .filter((row) => row.name_key === dish.name_key)
+          .map((row) => row.id as string);
+        const [tags, dishTags] = await Promise.all([
+          fetchTags(),
+          fetchDishPublicTags(sameDishIds.length > 0 ? sameDishIds : [id]),
+        ]);
+        setAllTags(tags);
+        setTagSlugs(dishTags.map((tag) => tag.slug));
 
         // Dishes this one could be a version of: not itself, and not
         // variants (variants don't nest).
@@ -132,6 +150,29 @@ export default function DishEditScreen() {
 
     setOptions([...options, option]);
     setOptionDraft('');
+  }
+
+  // Tag changes save right away, separately from the form.
+  async function toggleTag(slug: string) {
+    const on = !tagSlugs.includes(slug);
+    setSavingTag(slug);
+
+    const { error } = await supabase.rpc('set_dish_tag', {
+      p_dish_id: id,
+      p_tag: slug,
+      p_on: on,
+    });
+
+    setSavingTag(null);
+
+    if (error) {
+      Alert.alert('Error', error.message);
+      return;
+    }
+
+    setTagSlugs((current) =>
+      on ? [...current, slug] : current.filter((other) => other !== slug)
+    );
   }
 
   async function save() {
@@ -289,20 +330,50 @@ export default function DishEditScreen() {
           </>
         )}
 
-        <View style={styles.switchRow}>
-          <View style={styles.switchText}>
-            <Text style={styles.switchLabel}>Discontinued</Text>
-            <Text style={styles.switchHint}>
-              Hidden from the menu and Log suggestions. Reviews stay, labeled
-              Discontinued. Its variants follow.
-            </Text>
+        <Text style={styles.label}>Tags</Text>
+        <Text style={styles.hint}>
+          Saved as soon as you tap. Removing a tag also clears people’s votes
+          for it.
+        </Text>
+        {(['food', 'dietary', 'availability'] as const).map((kind) => (
+          <View key={kind} style={styles.tagGroup}>
+            {allTags
+              .filter((tag) => tag.kind === kind)
+              .map((tag) => {
+                const on = tagSlugs.includes(tag.slug);
+
+                return (
+                  <TouchableOpacity
+                    key={tag.slug}
+                    style={[styles.tagChip, on && styles.tagChipOn]}
+                    onPress={() => toggleTag(tag.slug)}
+                    disabled={savingTag !== null}
+                  >
+                    <Text style={[styles.tagText, on && styles.tagTextOn]}>
+                      {savingTag === tag.slug ? '…' : tag.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
           </View>
-          <Switch
-            value={discontinued}
-            onValueChange={setDiscontinued}
-            trackColor={{ true: Palette.accent }}
-          />
-        </View>
+        ))}
+
+        {isAdmin ? (
+          <View style={styles.switchRow}>
+            <View style={styles.switchText}>
+              <Text style={styles.switchLabel}>Discontinued</Text>
+              <Text style={styles.switchHint}>
+                Hidden from the menu and Log suggestions. Reviews stay, labeled
+                Discontinued. Its variants follow.
+              </Text>
+            </View>
+            <Switch
+              value={discontinued}
+              onValueChange={setDiscontinued}
+              trackColor={{ true: Palette.accent }}
+            />
+          </View>
+        ) : null}
       </ScrollView>
 
       <View style={styles.footer}>
@@ -391,6 +462,36 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: Palette.border,
+  },
+  hint: {
+    color: Palette.textMuted,
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  tagGroup: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  tagChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Palette.borderStrong,
+  },
+  tagChipOn: {
+    backgroundColor: Palette.accent,
+    borderColor: Palette.accent,
+  },
+  tagText: {
+    color: Palette.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  tagTextOn: {
+    color: Palette.text,
   },
   switchRow: {
     flexDirection: 'row',

@@ -17,6 +17,7 @@ import {
 } from "react-native";
 
 import { ContentMenu } from "@/components/content-menu";
+import { CoverPinControls } from "@/components/cover-pin-controls";
 import { fetchHiddenUserIds, withoutHiddenUsers } from "@/lib/moderation";
 import { formatRating, useIsPremium } from "@/lib/ratings";
 import { dishLabel } from '@/lib/dishes';
@@ -833,13 +834,16 @@ export default function ReviewDetailScreen() {
           </View>
 
           {photoUrl ? (
-            <Image
-              source={{
-                uri: photoUrl,
-              }}
-              style={styles.reviewPhoto}
-              resizeMode="cover"
-            />
+            <>
+              <Image
+                source={{
+                  uri: photoUrl,
+                }}
+                style={styles.reviewPhoto}
+                resizeMode="cover"
+              />
+              <CoverPinControls reviewId={String(review.id)} />
+            </>
           ) : null}
 
           {review.review_text ? (

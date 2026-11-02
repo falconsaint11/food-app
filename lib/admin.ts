@@ -2,46 +2,65 @@ import { useEffect, useState } from 'react';
 
 import { supabase } from '@/lib/supabase';
 
-// Whether the signed-in user is an app admin (a row in app_admins). Cached
-// per user so switching accounts checks again.
-let adminCache: { userId: string; promise: Promise<boolean> } | null = null;
+// Admins are rows in app_admins; curators are trusted members admins picked
+// (app_curators), who can scan menus, edit dishes and tags, and pin cover
+// photos. Admins count as curators.
+type Role = { isAdmin: boolean; isCurator: boolean };
 
-export async function fetchIsAdmin() {
+const NO_ROLE: Role = { isAdmin: false, isCurator: false };
+
+// Cached per user so switching accounts checks again.
+let roleCache: { userId: string; promise: Promise<Role> } | null = null;
+
+async function fetchRole() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return false;
+    return NO_ROLE;
   }
 
-  if (adminCache?.userId !== user.id) {
+  if (roleCache?.userId !== user.id) {
     const promise = (async () => {
-      const { data, error } = await supabase.rpc('is_app_admin');
+      const [admin, curator] = await Promise.all([
+        supabase.rpc('is_app_admin'),
+        supabase.rpc('is_app_curator'),
+      ]);
 
-      if (error) {
-        adminCache = null;
-        console.log('Admin check error:', error.message);
-        return false;
+      if (admin.error || curator.error) {
+        roleCache = null;
+        console.log(
+          'Role check error:',
+          admin.error?.message ?? curator.error?.message
+        );
+        return NO_ROLE;
       }
 
-      return data === true;
+      return {
+        isAdmin: admin.data === true,
+        isCurator: curator.data === true,
+      };
     })();
 
-    adminCache = { userId: user.id, promise };
+    roleCache = { userId: user.id, promise };
   }
 
-  return adminCache.promise;
+  return roleCache.promise;
 }
 
-export function useIsAdmin() {
-  const [isAdmin, setIsAdmin] = useState(false);
+export async function fetchIsAdmin() {
+  return (await fetchRole()).isAdmin;
+}
+
+function useRole() {
+  const [role, setRole] = useState(NO_ROLE);
 
   useEffect(() => {
     let active = true;
 
-    fetchIsAdmin().then((value) => {
-      if (active) setIsAdmin(value);
+    fetchRole().then((value) => {
+      if (active) setRole(value);
     });
 
     return () => {
@@ -49,5 +68,24 @@ export function useIsAdmin() {
     };
   }, []);
 
-  return isAdmin;
+  return role;
+}
+
+export function useIsAdmin() {
+  return useRole().isAdmin;
+}
+
+// True for curators and admins.
+export function useIsCurator() {
+  return useRole().isCurator;
+}
+
+// Admins choosing curators from someone's profile.
+export async function setCurator(userId: string, on: boolean) {
+  const { error } = await supabase.rpc('set_curator', {
+    p_user_id: userId,
+    p_on: on,
+  });
+
+  if (error) throw new Error(error.message);
 }

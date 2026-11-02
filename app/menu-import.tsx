@@ -13,7 +13,6 @@ import {
 } from 'react-native';
 
 import { Palette } from '@/constants/theme';
-import { getBrandLocationIds } from '@/lib/brands';
 import { supabase } from '@/lib/supabase';
 import { fetchTags, Tag } from '@/lib/tags';
 
@@ -32,16 +31,50 @@ type ScannedDish = {
 type ReviewItem = ScannedDish & {
   key: string;
   selected: boolean;
+  // For dishes already on the menu: overwrite their price, description and
+  // options with the scanned ones.
+  update: boolean;
 };
 
-// Menu import is for getting a restaurant started; import_menu_dishes()
-// refuses restaurants with this many dishes or more.
-const MAX_EXISTING_DISHES = 10;
+// The dish already on this location's menu under a scanned name.
+type ExistingDish = {
+  price: number | null;
+  description: string | null;
+  options: string[];
+};
 
-// Admin tool: photograph a restaurant's menu, let Claude read the dishes (the
-// menu-scan edge function), review them, then add them to this location with
-// import_menu_dishes(). Dishes already on the menu are skipped by the
-// database, but still get any new tags.
+// What a scan would change on a dish that's already on the menu. Blank
+// scanned fields never clear anything.
+function scanChanges(item: ReviewItem, existing: ExistingDish) {
+  const changes: string[] = [];
+  const price = item.price.replace(/[^0-9.]/g, '');
+  const description = item.description.trim();
+
+  if (price && Number(price) !== Number(existing.price ?? NaN)) {
+    changes.push(
+      `Price ${existing.price !== null ? `$${existing.price}` : 'none'} → $${price}`
+    );
+  }
+
+  if (description && description !== (existing.description ?? '')) {
+    changes.push(existing.description ? 'New description' : 'Adds a description');
+  }
+
+  if (
+    item.options.length > 0 &&
+    item.options.join('\n') !== existing.options.join('\n')
+  ) {
+    changes.push(existing.options.length > 0 ? 'New options' : 'Adds options');
+  }
+
+  return changes;
+}
+
+// Curator tool: photograph a restaurant's menu, let Claude read the dishes
+// (the menu-scan edge function), review them, then add them to this location
+// with import_menu_dishes(). Dishes already on the menu get any new tags and
+// keep their details, unless the curator chooses to update them from the
+// scan.
 export default function MenuImportScreen() {
   const { restaurantId, restaurantName } = useLocalSearchParams<{
     restaurantId: string;
@@ -54,7 +87,9 @@ export default function MenuImportScreen() {
   );
   const [saving, setSaving] = useState(false);
   const [editingTagsFor, setEditingTagsFor] = useState<string | null>(null);
-  const [hasFullMenu, setHasFullMenu] = useState(false);
+  const [existing, setExisting] = useState<Map<string, ExistingDish>>(
+    new Map()
+  );
 
   useEffect(() => {
     fetchTags()
@@ -62,33 +97,43 @@ export default function MenuImportScreen() {
       .catch((error) => console.log('Tags error:', error));
   }, []);
 
-  // Checked up front so a scan isn't paid for and then refused on save.
-  // Counted like the restaurant page: same-named dishes across the brand
-  // count once.
+  // Which scanned names are already on this location's menu. Rechecked
+  // when names change (after a scan or an edit), a moment after typing.
+  const itemNames = items.map((item) => item.name.trim()).join('\n');
+
   useEffect(() => {
-    if (!restaurantId) return;
+    if (!restaurantId || !itemNames) return;
 
-    (async () => {
-      const { data: restaurant } = await supabase
-        .from('restaurants')
-        .select('brand_id')
-        .eq('id', restaurantId)
-        .maybeSingle();
+    const timer = setTimeout(async () => {
+      const { data, error } = await supabase.rpc('menu_import_matches', {
+        p_restaurant_id: restaurantId,
+        p_names: itemNames.split('\n'),
+      });
 
-      const locationIds = await getBrandLocationIds(
-        restaurantId,
-        (restaurant?.brand_id as string | null) ?? null
+      if (error) {
+        console.log('Menu match error:', error.message);
+        return;
+      }
+
+      setExisting(
+        new Map(
+          (data ?? []).map(
+            (row: ExistingDish & { name: string }) =>
+              [
+                row.name,
+                {
+                  price: row.price === null ? null : Number(row.price),
+                  description: row.description,
+                  options: row.options ?? [],
+                },
+              ] as const
+          )
+        )
       );
+    }, 400);
 
-      const { data: dishes } = await supabase
-        .from('dishes')
-        .select('name_key')
-        .in('restaurant_id', locationIds);
-
-      const names = new Set((dishes ?? []).map((dish) => dish.name_key as string));
-      setHasFullMenu(names.size >= MAX_EXISTING_DISHES);
-    })().catch((error) => console.log('Menu size check error:', error));
-  }, [restaurantId]);
+    return () => clearTimeout(timer);
+  }, [restaurantId, itemNames]);
 
   async function takePhoto() {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
@@ -200,6 +245,7 @@ export default function MenuImportScreen() {
           options: dish.options ?? [],
           variants: dish.variants ?? [],
           selected: true,
+          update: false,
         });
       }
     }
@@ -238,6 +284,7 @@ export default function MenuImportScreen() {
         options: item.options,
         variants: item.variants,
         tags: item.tags,
+        update: item.update,
       })),
     });
 
@@ -248,19 +295,57 @@ export default function MenuImportScreen() {
       return;
     }
 
-    const result = (data as { added: number; matched: number }[])[0];
+    const result = (
+      data as { added: number; matched: number; updated: number }[]
+    )[0];
+    const kept = result.matched - result.updated;
 
     Alert.alert(
-      'Menu added',
+      'Menu saved',
       `Added ${result.added} new ${result.added === 1 ? 'dish' : 'dishes'}.` +
-        (result.matched > 0
-          ? ` ${result.matched} ${result.matched === 1 ? 'was' : 'were'} already on the menu and got the new tags.`
+        (result.updated > 0
+          ? ` Updated ${result.updated} from the scan.`
+          : '') +
+        (kept > 0
+          ? ` ${kept} ${kept === 1 ? 'was' : 'were'} already on the menu and got any new tags.`
           : ''),
       [{ text: 'OK', onPress: () => router.back() }]
     );
   }
 
   const tagLabels = new Map(allTags.map((tag) => [tag.slug, tag]));
+
+  function renderExisting(item: ReviewItem) {
+    const match = existing.get(item.name.trim());
+    if (!match) return null;
+
+    const changes = scanChanges(item, match);
+
+    if (changes.length === 0) {
+      return (
+        <Text style={styles.existingNote}>
+          Already on the menu. Nothing new from the scan.
+        </Text>
+      );
+    }
+
+    return (
+      <TouchableOpacity
+        style={[styles.existingBox, item.update && styles.existingBoxOn]}
+        onPress={() => updateItem(item.key, { update: !item.update })}
+      >
+        <View style={[styles.smallCheckbox, item.update && styles.checkboxOn]}>
+          {item.update ? <Text style={styles.smallCheckmark}>✓</Text> : null}
+        </View>
+        <View style={styles.existingText}>
+          <Text style={styles.existingTitle}>
+            Already on the menu. Update it from the scan?
+          </Text>
+          <Text style={styles.existingChanges}>{changes.join(' · ')}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  }
 
   function renderPhotoButtons() {
     return (
@@ -285,13 +370,7 @@ export default function MenuImportScreen() {
       >
         <Text style={styles.title}>{restaurantName ?? 'Restaurant'}</Text>
 
-        {hasFullMenu && items.length === 0 ? (
-          <Text style={styles.subtitle}>
-            This restaurant already has {MAX_EXISTING_DISHES} or more dishes, so
-            its menu can&apos;t be imported. Menu import is for getting new
-            restaurants started.
-          </Text>
-        ) : progress ? (
+        {progress ? (
           <View style={styles.progress}>
             <ActivityIndicator color={Palette.accent} />
             <Text style={styles.progressText}>
@@ -303,7 +382,8 @@ export default function MenuImportScreen() {
           <>
             <Text style={styles.subtitle}>
               Photograph each page of the menu, close enough that the text is
-              sharp. You&apos;ll review every dish before anything is added.
+              sharp. You&apos;ll review every dish before anything is saved,
+              and choose whether dishes already on the menu get updated.
             </Text>
             {renderPhotoButtons()}
           </>
@@ -370,6 +450,8 @@ export default function MenuImportScreen() {
                 {item.section ? (
                   <Text style={styles.section}>{item.section}</Text>
                 ) : null}
+
+                {renderExisting(item)}
 
                 <TextInput
                   style={styles.descriptionInput}
@@ -472,8 +554,8 @@ export default function MenuImportScreen() {
           >
             <Text style={styles.saveButtonText}>
               {saving
-                ? 'Adding…'
-                : `Add ${selectedItems.length} ${selectedItems.length === 1 ? 'dish' : 'dishes'}`}
+                ? 'Saving…'
+                : `Save ${selectedItems.length} ${selectedItems.length === 1 ? 'dish' : 'dishes'}`}
             </Text>
           </TouchableOpacity>
         </View>
@@ -483,6 +565,52 @@ export default function MenuImportScreen() {
 }
 
 const styles = StyleSheet.create({
+  existingNote: {
+    color: Palette.textMuted,
+    fontSize: 13,
+    marginTop: 6,
+  },
+  existingBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Palette.borderStrong,
+  },
+  existingBoxOn: {
+    borderColor: Palette.accent,
+  },
+  smallCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: Palette.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  smallCheckmark: {
+    color: Palette.text,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  existingText: {
+    flex: 1,
+  },
+  existingTitle: {
+    color: Palette.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  existingChanges: {
+    color: Palette.textSecondary,
+    fontSize: 13,
+    marginTop: 3,
+  },
   screen: {
     flex: 1,
     backgroundColor: Palette.background,

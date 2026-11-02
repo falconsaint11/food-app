@@ -1,5 +1,5 @@
 // Reads one photo of a restaurant menu with Claude and returns the dishes on
-// it, with suggested tags. Admins only. Nothing is saved here: the app shows
+// it, with suggested tags. Curators and admins only. Nothing is saved here: the app shows
 // the dishes for review and saves them with import_menu_dishes().
 //
 // Deploy:  supabase functions deploy menu-scan
@@ -63,14 +63,6 @@ Deno.serve(async (req) => {
       },
     );
 
-    const { data: isAdmin, error: adminError } = await supabase.rpc(
-      "is_app_admin",
-    );
-
-    if (adminError || !isAdmin) {
-      return json({ error: "Only admins can scan menus." }, 403);
-    }
-
     const { image, mediaType } = await req.json();
 
     if (
@@ -80,6 +72,15 @@ Deno.serve(async (req) => {
       !MEDIA_TYPES.includes(mediaType)
     ) {
       return json({ error: "Send one JPEG, PNG or WebP image under 5 MB." }, 400);
+    }
+
+    // Checks the user is a curator or admin and counts the scan toward
+    // their daily limit (see claim_menu_scan()). After the image check, so
+    // a bad photo doesn't use up a scan.
+    const { error: claimError } = await supabase.rpc("claim_menu_scan");
+
+    if (claimError) {
+      return json({ error: claimError.message }, 403);
     }
 
     const { data: tags, error: tagsError } = await supabase

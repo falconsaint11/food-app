@@ -1,6 +1,6 @@
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   ActivityIndicator,
@@ -17,6 +17,7 @@ import { ContentMenu } from '@/components/content-menu';
 import { ListsSection } from '@/components/lists-section';
 import { RatingsChart } from '@/components/ratings-chart';
 import { latestPhotoPaths, TopPickCard } from '@/components/top-pick-card';
+import { setCurator, useIsAdmin } from '@/lib/admin';
 import { fetchHiddenUserIds, unblockUser } from '@/lib/moderation';
 import { formatRating, useIsPremium } from '@/lib/ratings';
 import { dishLabel } from "@/lib/dishes";
@@ -102,7 +103,54 @@ type DiaryEntry = {
 
 export default function UserProfileScreen() {
   const isPremium = useIsPremium();
+  const isAdmin = useIsAdmin();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const [isCurator, setIsCurator] = useState(false);
+  const [savingCurator, setSavingCurator] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+
+    supabase
+      .from("app_curators")
+      .select("user_id")
+      .eq("user_id", id)
+      .maybeSingle()
+      .then(({ data }) => setIsCurator(Boolean(data)));
+  }, [id]);
+
+  function toggleCurator() {
+    const on = !isCurator;
+
+    Alert.alert(
+      on ? "Make curator?" : "Remove curator?",
+      on
+        ? "They’ll be able to scan menus, edit dishes and tags, and pin cover photos. Their edits are logged."
+        : "They’ll lose curator tools. Their past edits stay.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: on ? "Make curator" : "Remove",
+          style: on ? "default" : "destructive",
+          onPress: async () => {
+            setSavingCurator(true);
+
+            try {
+              await setCurator(id, on);
+              setIsCurator(on);
+            } catch (error) {
+              Alert.alert(
+                "Error",
+                error instanceof Error ? error.message : "Something went wrong."
+              );
+            } finally {
+              setSavingCurator(false);
+            }
+          },
+        },
+      ]
+    );
+  }
 
   const [profile, setProfile] = useState<PublicProfile | null>(null);
 
@@ -668,6 +716,24 @@ export default function UserProfileScreen() {
 
         <Text style={styles.username}>@{profile.username}</Text>
 
+        {isCurator ? (
+          <View style={styles.curatorBadge}>
+            <Text style={styles.curatorBadgeText}>Curator</Text>
+          </View>
+        ) : null}
+
+        {isAdmin && currentUserId !== id ? (
+          <TouchableOpacity onPress={toggleCurator} disabled={savingCurator}>
+            <Text style={styles.curatorLink}>
+              {savingCurator
+                ? "Saving…"
+                : isCurator
+                  ? "Admin: remove curator"
+                  : "Admin: make curator"}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
         {profile.city?.trim() ? (
           <View style={styles.cityRow}>
             <Text style={styles.cityPin}>📍</Text>
@@ -988,6 +1054,30 @@ const styles = StyleSheet.create({
     textAlign: "center",
 
     marginTop: 14,
+  },
+
+  curatorBadge: {
+    alignSelf: "center",
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Palette.accent,
+  },
+
+  curatorBadgeText: {
+    color: Palette.accent,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  curatorLink: {
+    color: Palette.textMuted,
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 8,
+    textAlign: "center",
   },
 
   username: {

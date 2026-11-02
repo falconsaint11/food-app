@@ -25,7 +25,7 @@ import {
   LogDishCard,
 } from "@/components/log-dish-card";
 import { StarRatingInput } from "@/components/star-rating-input";
-import { useIsAdmin } from "@/lib/admin";
+import { useIsCurator } from "@/lib/admin";
 import { getBrandLocationIds } from "@/lib/brands";
 import { supabase } from "@/lib/supabase";
 import { fetchTags, Tag } from "@/lib/tags";
@@ -229,7 +229,7 @@ export default function LogScreen() {
   const [allTags, setAllTags] = useState<Tag[]>([]);
 
   const [loading, setLoading] = useState(false);
-  const isAdmin = useIsAdmin();
+  const isCurator = useIsCurator();
 
   const googleSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -1500,10 +1500,10 @@ export default function LogScreen() {
               </TouchableOpacity>
             </View>
 
-            {isAdmin ? (
+            {isCurator ? (
               <TouchableOpacity onPress={openMenuImport} disabled={loading}>
                 <Text style={styles.menuImportLink}>
-                  Admin: add dishes from a menu photo
+                  Curator: add dishes from a menu photo
                 </Text>
               </TouchableOpacity>
             ) : null}

@@ -20,7 +20,7 @@ import {
   getBrandLocationIds,
   getBrandLocationsNearestFirst,
 } from '@/lib/brands';
-import { useIsAdmin } from '@/lib/admin';
+import { useIsCurator } from '@/lib/admin';
 import { withoutHiddenUsers } from '@/lib/moderation';
 import { formatRating, useIsPremium } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
@@ -71,7 +71,7 @@ type RelatedDish = {
 
 export default function DishDetailScreen() {
   const isPremium = useIsPremium();
-  const isAdmin = useIsAdmin();
+  const isCurator = useIsCurator();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [dish, setDish] = useState<Dish | null>(null);
@@ -331,7 +331,7 @@ export default function DishDetailScreen() {
           {dish.name}
         </Text>
 
-        {dish.discontinued_at || isAdmin ? (
+        {dish.discontinued_at || isCurator ? (
           <View style={styles.statusRow}>
             {dish.discontinued_at ? (
               <View style={styles.discontinuedBadge}>
@@ -339,7 +339,7 @@ export default function DishDetailScreen() {
               </View>
             ) : null}
 
-            {isAdmin ? (
+            {isCurator ? (
               <TouchableOpacity
                 onPress={() =>
                   router.push({ pathname: '/dish-edit', params: { id: dish.id } })
