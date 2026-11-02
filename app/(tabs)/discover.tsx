@@ -1,13 +1,11 @@
 import * as Location from 'expo-location';
-
+import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
-
-import { useCallback, useState } from 'react';
-
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,11 +13,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { supabase } from '@/lib/supabase';
-import { withoutHiddenUsers } from '@/lib/moderation';
-import { fetchTags, Tag } from '@/lib/tags';
+import { PhotoCard, PhotoCardRow } from '@/components/photo-card-row';
+import { MapRestaurant, RestaurantMap } from '@/components/restaurant-map';
 import { Palette } from '@/constants/theme';
+import { withoutHiddenUsers } from '@/lib/moderation';
+import { supabase } from '@/lib/supabase';
+import { fetchTags, Tag } from '@/lib/tags';
 
 type SearchType = 'users' | 'restaurants' | 'dishes';
 
@@ -47,36 +48,14 @@ type DishResult = {
   } | null;
 };
 
-type ExploreRestaurant = {
-  id: string;
-  name: string;
-  city: string | null;
-  state: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  averageRating: number;
-  reviewCount: number;
-};
-
-type NearbyRestaurant = ExploreRestaurant & {
-  distanceMiles: number;
-};
-
-type ExploreDish = {
-  id: string;
-  name: string;
-  restaurantName: string;
-  city: string | null;
-  averageRating: number;
-  reviewCount: number;
-};
-
 type ExploreReview = {
   rating: number;
   created_at: string;
+  photo_path: string | null;
   dishes: {
     id: string;
     name: string;
+    name_key: string;
     restaurants: {
       id: string;
       name: string;
@@ -84,2224 +63,1328 @@ type ExploreReview = {
       state: string | null;
       latitude: number | null;
       longitude: number | null;
+      brand_id: string | null;
+      brands: { name: string } | null;
     } | null;
   } | null;
 };
 
+// Ratings and the best photo of one restaurant location, one restaurant
+// (all locations of a brand), or one dish.
+type Stats = {
+  id: string;
+  name: string;
+  subtitle: string;
+  count: number;
+  total: number;
+  weekCount: number;
+  photoPath: string | null;
+  photoRating: number;
+  // Locations only.
+  latitude: number | null;
+  longitude: number | null;
+  // Restaurants only: how many locations were reviewed, and the most
+  // reviewed one, which cards link to.
+  locations: Set<string>;
+  topLocationCounts: Map<string, number>;
+};
+
+type Ranked = Stats & { averageRating: number; score: number };
+
+type NearbySpot = Ranked & { distanceMiles: number };
+
+type FriendReview = {
+  id: string;
+  rating: number;
+  photo_path: string | null;
+  user_id: string;
+  profiles: { username: string; display_name: string | null } | null;
+  dishes: {
+    name: string;
+    restaurants: { name: string; brands: { name: string } | null } | null;
+  } | null;
+};
+
+type TagDish = {
+  dish_id: string;
+  name: string;
+  restaurant_name: string;
+  average_rating: number;
+  review_count: number;
+};
+
+// Coming back to Discover within this long shows what's already loaded.
+// Pull to refresh reloads anytime.
+const FRESH_FOR_MS = 5 * 60 * 1000;
+
+// Where a reload comes from. Only the first load and the location prompt
+// ask for location permission; only pull to refresh waits for a fresh GPS
+// fix.
+type LoadReason = 'focus' | 'refresh' | 'ask-location';
+
+// Reviews Discover is built from, newest first.
+const REVIEW_SAMPLE = 1000;
+
+const ROW_COUNT = 10;
+
+const NEARBY_MILES = 25;
+
+// Each average starts with this many imaginary reviews at the app-wide
+// average, so one 5-star review can't top a list.
+const RANKING_PRIOR = 3;
+
+const TAG_EMOJI: Record<string, string> = {
+  burger: '🍔',
+  sandwich: '🥪',
+  pizza: '🍕',
+  mexican: '🌮',
+  sushi: '🍣',
+  pasta: '🍝',
+  noodles: '🍜',
+  chicken: '🍗',
+  wings: '🔥',
+  seafood: '🦐',
+  steak: '🥩',
+  bbq: '🍖',
+  salad: '🥗',
+  soup: '🍲',
+  breakfast: '🥞',
+  side: '🍟',
+  appetizer: '🥟',
+  dessert: '🍰',
+  'coffee-tea': '☕',
+  drink: '🥤',
+  'alcoholic-drink': '🍹',
+  'gluten-free': '🌾',
+  'gluten-friendly': '🌾',
+  'dairy-free': '🥛',
+  vegetarian: '🥦',
+  vegan: '🌱',
+};
+
+function getDistanceMiles(
+  from: { latitude: number; longitude: number },
+  to: { latitude: number; longitude: number }
+) {
+  const toRadians = (degrees: number) => degrees * (Math.PI / 180);
+  const latitudeDifference = toRadians(to.latitude - from.latitude);
+  const longitudeDifference = toRadians(to.longitude - from.longitude);
+  const a =
+    Math.sin(latitudeDifference / 2) ** 2 +
+    Math.cos(toRadians(from.latitude)) *
+      Math.cos(toRadians(to.latitude)) *
+      Math.sin(longitudeDifference / 2) ** 2;
+
+  return 3958.8 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function locationText(city: string | null, state: string | null) {
+  return [city, state].filter(Boolean).join(', ');
+}
+
+function reviewsText(count: number) {
+  return `${count} ${count === 1 ? 'review' : 'reviews'}`;
+}
+
+function addReview(
+  map: Map<string, Stats>,
+  key: string,
+  base: () => Omit<
+    Stats,
+    | 'count'
+    | 'total'
+    | 'weekCount'
+    | 'photoPath'
+    | 'photoRating'
+    | 'locations'
+    | 'topLocationCounts'
+  >,
+  review: ExploreReview,
+  locationId: string,
+  isThisWeek: boolean
+) {
+  let stats = map.get(key);
+
+  if (!stats) {
+    stats = {
+      ...base(),
+      count: 0,
+      total: 0,
+      weekCount: 0,
+      photoPath: null,
+      photoRating: -1,
+      locations: new Set(),
+      topLocationCounts: new Map(),
+    };
+    map.set(key, stats);
+  }
+
+  const rating = Number(review.rating);
+  stats.count += 1;
+  stats.total += rating;
+  if (isThisWeek) stats.weekCount += 1;
+  stats.locations.add(locationId);
+  stats.topLocationCounts.set(
+    locationId,
+    (stats.topLocationCounts.get(locationId) ?? 0) + 1
+  );
+
+  // The highest-rated photo; ties go to the newest (reviews come newest
+  // first).
+  if (review.photo_path && rating > stats.photoRating) {
+    stats.photoPath = review.photo_path;
+    stats.photoRating = rating;
+  }
+}
+
+function rank(map: Map<string, Stats>, mean: number): Ranked[] {
+  return [...map.values()].map((stats) => ({
+    ...stats,
+    averageRating: stats.total / stats.count,
+    score: (stats.total + RANKING_PRIOR * mean) / (stats.count + RANKING_PRIOR),
+  }));
+}
+
+// The location of a restaurant with the most reviews.
+function topLocation(stats: Stats) {
+  return [...stats.topLocationCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
+
 export default function DiscoverScreen() {
+  const insets = useSafeAreaInsets();
+
+  const [mode, setMode] = useState<'list' | 'map'>('list');
+
   const [query, setQuery] = useState('');
+  const [searchType, setSearchType] = useState<SearchType>('restaurants');
+  const [userResults, setUserResults] = useState<UserResult[]>([]);
+  const [restaurantResults, setRestaurantResults] = useState<RestaurantResult[]>([]);
+  const [dishResults, setDishResults] = useState<DishResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
 
-  const [searchType, setSearchType] =
-    useState<SearchType>('users');
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [followingIds, setFollowingIds] = useState<string[]>([]);
 
-  const [userResults, setUserResults] =
-    useState<UserResult[]>([]);
+  const [exploreLoading, setExploreLoading] = useState(true);
+  const [userLocation, setUserLocation] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+  const [nearby, setNearby] = useState<NearbySpot[]>([]);
+  const [mapRestaurants, setMapRestaurants] = useState<MapRestaurant[]>([]);
+  const [friendReviews, setFriendReviews] = useState<FriendReview[]>([]);
+  const [trending, setTrending] = useState<Ranked[]>([]);
+  const [topDishes, setTopDishes] = useState<Ranked[]>([]);
+  const [hiddenGems, setHiddenGems] = useState<Ranked[]>([]);
+  const [topRestaurants, setTopRestaurants] = useState<Ranked[]>([]);
 
-  const [restaurantResults, setRestaurantResults] =
-    useState<RestaurantResult[]>([]);
-
-  const [dishResults, setDishResults] =
-    useState<DishResult[]>([]);
-
-  const [searchLoading, setSearchLoading] =
-    useState(false);
-
-  const [exploreLoading, setExploreLoading] =
-    useState(true);
-
-  const [locationAllowed, setLocationAllowed] =
-    useState(false);
-
-  const [followingIds, setFollowingIds] =
-    useState<string[]>([]);
-
-  const [currentUserId, setCurrentUserId] =
-    useState<string | null>(null);
-
-  const [nearbyRestaurants, setNearbyRestaurants] =
-    useState<NearbyRestaurant[]>([]);
-
-  const [trendingRestaurants, setTrendingRestaurants] =
-    useState<ExploreRestaurant[]>([]);
-
-  const [topRestaurants, setTopRestaurants] =
-    useState<ExploreRestaurant[]>([]);
-
-  const [topDishes, setTopDishes] =
-    useState<ExploreDish[]>([]);
-
-  const [allTags, setAllTags] = useState<Tag[]>([]);
-
-  // null = "All": the regular Top Rated Dishes list.
-  const [selectedTag, setSelectedTag] =
-    useState<string | null>(null);
-
-  const [tagDishes, setTagDishes] =
-    useState<ExploreDish[]>([]);
-
+  const [categories, setCategories] = useState<Tag[]>([]);
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [tagDishes, setTagDishes] = useState<PhotoCard[]>([]);
   const [tagLoading, setTagLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const [
-    mostReviewedRestaurants,
-    setMostReviewedRestaurants,
-  ] = useState<ExploreRestaurant[]>([]);
-
-  const [
-    mostReviewedDishes,
-    setMostReviewedDishes,
-  ] = useState<ExploreDish[]>([]);
+  // When Discover last finished loading (0 = never), and whether we've
+  // asked for location this session.
+  const loadedAt = useRef(0);
+  const askedForLocation = useRef(false);
 
   useFocusEffect(
     useCallback(() => {
-      loadFollowing();
-      loadExplore();
-      loadTags();
+      if (Date.now() - loadedAt.current > FRESH_FOR_MS) {
+        loadExplore('focus');
+      }
+
+      fetchTags()
+        .then((tags) =>
+          setCategories(
+            tags.filter((tag) => tag.kind === 'food' || tag.kind === 'dietary')
+          )
+        )
+        .catch((error) => console.log('Could not load tags:', error));
     }, [])
   );
 
-  async function loadFollowing() {
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
-      return;
-    }
-
-    setCurrentUserId(user.id);
-
-    const { data, error } = await supabase
-      .from('follows')
-      .select('following_id')
-      .eq('follower_id', user.id);
-
-    if (error) {
-      console.log(
-        'Following load error:',
-        error.message
-      );
-
-      return;
-    }
-
-    setFollowingIds(
-      (data ?? []).map(
-        (row) => row.following_id
-      )
-    );
-  }
-
-  function degreesToRadians(degrees: number) {
-    return degrees * (Math.PI / 180);
-  }
-
-  function getDistanceMiles(
-    latitude1: number,
-    longitude1: number,
-    latitude2: number,
-    longitude2: number
-  ) {
-    const earthRadiusMiles = 3958.8;
-
-    const latitudeDifference =
-      degreesToRadians(
-        latitude2 - latitude1
-      );
-
-    const longitudeDifference =
-      degreesToRadians(
-        longitude2 - longitude1
-      );
-
-    const firstLatitude =
-      degreesToRadians(latitude1);
-
-    const secondLatitude =
-      degreesToRadians(latitude2);
-
-    const a =
-      Math.sin(
-        latitudeDifference / 2
-      ) ** 2 +
-      Math.cos(firstLatitude) *
-        Math.cos(secondLatitude) *
-        Math.sin(
-          longitudeDifference / 2
-        ) ** 2;
-
-    const c =
-      2 *
-      Math.atan2(
-        Math.sqrt(a),
-        Math.sqrt(1 - a)
-      );
-
-    return earthRadiusMiles * c;
-  }
-
-  async function getUserLocation() {
+  async function getUserLocation(reason: LoadReason) {
     try {
       const permission =
-        await Location.requestForegroundPermissionsAsync();
+        reason === 'focus' && askedForLocation.current
+          ? await Location.getForegroundPermissionsAsync()
+          : await Location.requestForegroundPermissionsAsync();
+      askedForLocation.current = true;
 
       if (!permission.granted) {
-        setLocationAllowed(false);
         return null;
       }
 
-      const location =
-        await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+      // A recent position the phone already has costs no GPS time.
+      const recent =
+        reason === 'refresh'
+          ? null
+          : await Location.getLastKnownPositionAsync({ maxAge: FRESH_FOR_MS });
 
-      setLocationAllowed(true);
+      const location =
+        recent ??
+        (await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        }));
 
       return {
-        latitude:
-          location.coords.latitude,
-        longitude:
-          location.coords.longitude,
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
       };
     } catch (error) {
-      console.log(
-        'Discover location error:',
-        error
-      );
-
-      setLocationAllowed(false);
-
+      console.log('Discover location error:', error);
       return null;
     }
   }
 
-  async function loadExplore() {
-    setExploreLoading(true);
+  async function loadFriendReviews(userId: string) {
+    const { data: followData } = await supabase
+      .from('follows')
+      .select('following_id')
+      .eq('follower_id', userId);
 
-    const userLocation =
-      await getUserLocation();
+    const ids = (followData ?? []).map((row) => row.following_id as string);
+    setFollowingIds(ids);
+
+    if (ids.length === 0) {
+      setFriendReviews([]);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('reviews')
+      .select(`
+        id,
+        rating,
+        photo_path,
+        user_id,
+        profiles:user_id (username, display_name),
+        dishes (name, restaurants (name, brands (name)))
+      `)
+      .in('user_id', ids)
+      .order('created_at', { ascending: false })
+      .limit(ROW_COUNT * 2);
+
+    if (error) {
+      console.log('Friend reviews error:', error.message);
+      return;
+    }
+
+    const visible = await withoutHiddenUsers(
+      (data ?? []) as unknown as FriendReview[],
+      (review) => review.user_id
+    );
+
+    // Reviews with photos first; it's a photo row.
+    setFriendReviews(
+      [...visible]
+        .sort((a, b) => Number(Boolean(b.photo_path)) - Number(Boolean(a.photo_path)))
+        .slice(0, ROW_COUNT)
+    );
+  }
+
+  // The first load shows a spinner; later ones keep showing the old content
+  // until the new one is ready.
+  async function loadExplore(reason: LoadReason) {
+    if (loadedAt.current === 0) {
+      setExploreLoading(true);
+    }
+
+    const [location, { data: auth }] = await Promise.all([
+      getUserLocation(reason),
+      supabase.auth.getUser(),
+    ]);
+
+    setUserLocation(location);
+    setCurrentUserId(auth.user?.id ?? null);
+
+    if (auth.user) {
+      loadFriendReviews(auth.user.id);
+    }
 
     const { data, error } = await supabase
       .from('reviews')
       .select(`
         rating,
         created_at,
+        photo_path,
         dishes (
           id,
           name,
+          name_key,
           restaurants (
             id,
             name,
             city,
             state,
             latitude,
-            longitude
+            longitude,
+            brand_id,
+            brands (name)
           )
         )
       `)
-      .limit(500);
+      .order('created_at', { ascending: false })
+      .limit(REVIEW_SAMPLE);
 
     if (error) {
       setExploreLoading(false);
-
-      console.log(
-        'Explore load error:',
-        error.message
-      );
-
+      console.log('Explore load error:', error.message);
       return;
     }
 
-    const reviews =
-      (data ?? []) as unknown as ExploreReview[];
+    const reviews = (data ?? []) as unknown as ExploreReview[];
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
-    const restaurantMap = new Map<
-      string,
-      {
-        id: string;
-        name: string;
-        city: string | null;
-        state: string | null;
-        latitude: number | null;
-        longitude: number | null;
-        totalRating: number;
-        reviewCount: number;
-      }
-    >();
+    // Locations (for nearby and the map), restaurants pooled by brand (for
+    // the lists, like the restaurant page), and dishes pooled the same way.
+    const locations = new Map<string, Stats>();
+    const restaurants = new Map<string, Stats>();
+    const dishes = new Map<string, Stats>();
+    let total = 0;
 
-    const weeklyRestaurantMap = new Map<
-      string,
-      {
-        id: string;
-        name: string;
-        city: string | null;
-        state: string | null;
-        latitude: number | null;
-        longitude: number | null;
-        totalRating: number;
-        reviewCount: number;
-      }
-    >();
-
-    const dishMap = new Map<
-      string,
-      {
-        id: string;
-        name: string;
-        restaurantName: string;
-        city: string | null;
-        totalRating: number;
-        reviewCount: number;
-      }
-    >();
-
-    const sevenDaysAgo =
-      Date.now() -
-      7 * 24 * 60 * 60 * 1000;
-
-    reviews.forEach((review) => {
+    for (const review of reviews) {
       const dish = review.dishes;
+      const restaurant = dish?.restaurants;
+      if (!dish || !restaurant) continue;
 
-      const restaurant =
-        review.dishes?.restaurants;
+      total += Number(review.rating);
+      const isThisWeek = new Date(review.created_at).getTime() >= weekAgo;
+      const name = restaurant.brands?.name ?? restaurant.name;
+      const groupKey = restaurant.brand_id ?? restaurant.id;
 
-      if (!dish) {
-        return;
-      }
+      addReview(
+        locations,
+        restaurant.id,
+        () => ({
+          id: restaurant.id,
+          name,
+          subtitle: locationText(restaurant.city, restaurant.state),
+          latitude: restaurant.latitude === null ? null : Number(restaurant.latitude),
+          longitude: restaurant.longitude === null ? null : Number(restaurant.longitude),
+        }),
+        review,
+        restaurant.id,
+        isThisWeek
+      );
 
-      const numericRating =
-        Number(review.rating);
+      addReview(
+        restaurants,
+        groupKey,
+        () => ({
+          id: restaurant.id,
+          name,
+          subtitle: locationText(restaurant.city, restaurant.state),
+          latitude: null,
+          longitude: null,
+        }),
+        review,
+        restaurant.id,
+        isThisWeek
+      );
 
-      const existingDish =
-        dishMap.get(dish.id);
-
-      if (existingDish) {
-        existingDish.totalRating +=
-          numericRating;
-
-        existingDish.reviewCount += 1;
-      } else {
-        dishMap.set(dish.id, {
+      addReview(
+        dishes,
+        `${groupKey}:${dish.name_key}`,
+        () => ({
           id: dish.id,
           name: dish.name,
-          restaurantName:
-            restaurant?.name ??
-            'Unknown restaurant',
-          city:
-            restaurant?.city ?? null,
-          totalRating: numericRating,
-          reviewCount: 1,
-        });
-      }
-
-      if (!restaurant) {
-        return;
-      }
-
-      const latitude =
-        restaurant.latitude !== null
-          ? Number(
-              restaurant.latitude
-            )
-          : null;
-
-      const longitude =
-        restaurant.longitude !== null
-          ? Number(
-              restaurant.longitude
-            )
-          : null;
-
-      const existingRestaurant =
-        restaurantMap.get(
-          restaurant.id
-        );
-
-      if (existingRestaurant) {
-        existingRestaurant.totalRating +=
-          numericRating;
-
-        existingRestaurant.reviewCount +=
-          1;
-      } else {
-        restaurantMap.set(
-          restaurant.id,
-          {
-            id: restaurant.id,
-            name: restaurant.name,
-            city: restaurant.city,
-            state: restaurant.state,
-            latitude,
-            longitude,
-            totalRating:
-              numericRating,
-            reviewCount: 1,
-          }
-        );
-      }
-
-      const reviewTime =
-        new Date(
-          review.created_at
-        ).getTime();
-
-      if (
-        reviewTime >= sevenDaysAgo
-      ) {
-        const weeklyRestaurant =
-          weeklyRestaurantMap.get(
-            restaurant.id
-          );
-
-        if (weeklyRestaurant) {
-          weeklyRestaurant.totalRating +=
-            numericRating;
-
-          weeklyRestaurant.reviewCount +=
-            1;
-        } else {
-          weeklyRestaurantMap.set(
-            restaurant.id,
-            {
-              id: restaurant.id,
-              name: restaurant.name,
-              city: restaurant.city,
-              state: restaurant.state,
-              latitude,
-              longitude,
-              totalRating:
-                numericRating,
-              reviewCount: 1,
-            }
-          );
-        }
-      }
-    });
-
-    const restaurantList: ExploreRestaurant[] =
-      Array.from(
-        restaurantMap.values()
-      ).map((restaurant) => ({
-        id: restaurant.id,
-        name: restaurant.name,
-        city: restaurant.city,
-        state: restaurant.state,
-        latitude:
-          restaurant.latitude,
-        longitude:
-          restaurant.longitude,
-        averageRating:
-          restaurant.totalRating /
-          restaurant.reviewCount,
-        reviewCount:
-          restaurant.reviewCount,
-      }));
-
-    const weeklyRestaurantList: ExploreRestaurant[] =
-      Array.from(
-        weeklyRestaurantMap.values()
-      ).map((restaurant) => ({
-        id: restaurant.id,
-        name: restaurant.name,
-        city: restaurant.city,
-        state: restaurant.state,
-        latitude:
-          restaurant.latitude,
-        longitude:
-          restaurant.longitude,
-        averageRating:
-          restaurant.totalRating /
-          restaurant.reviewCount,
-        reviewCount:
-          restaurant.reviewCount,
-      }));
-
-    const dishList: ExploreDish[] =
-      Array.from(
-        dishMap.values()
-      ).map((dish) => ({
-        id: dish.id,
-        name: dish.name,
-        restaurantName:
-          dish.restaurantName,
-        city: dish.city,
-        averageRating:
-          dish.totalRating /
-          dish.reviewCount,
-        reviewCount:
-          dish.reviewCount,
-      }));
-
-    if (userLocation) {
-      const nearby =
-        restaurantList
-          .filter(
-            (restaurant) =>
-              restaurant.latitude !== null &&
-              restaurant.longitude !== null
-          )
-          .map((restaurant) => {
-            const distanceMiles =
-              getDistanceMiles(
-                userLocation.latitude,
-                userLocation.longitude,
-                restaurant.latitude!,
-                restaurant.longitude!
-              );
-
-            return {
-              ...restaurant,
-              distanceMiles,
-            };
-          })
-          .filter(
-            (restaurant) =>
-              restaurant.distanceMiles <= 25
-          )
-          .sort((a, b) => {
-            if (
-              b.averageRating !==
-              a.averageRating
-            ) {
-              return (
-                b.averageRating -
-                a.averageRating
-              );
-            }
-
-            if (
-              b.reviewCount !==
-              a.reviewCount
-            ) {
-              return (
-                b.reviewCount -
-                a.reviewCount
-              );
-            }
-
-            return (
-              a.distanceMiles -
-              b.distanceMiles
-            );
-          })
-          .slice(0, 5);
-
-      setNearbyRestaurants(nearby);
-    } else {
-      setNearbyRestaurants([]);
+          subtitle: name,
+          latitude: null,
+          longitude: null,
+        }),
+        review,
+        dish.id,
+        isThisWeek
+      );
     }
 
-    const trendingByWeek = [
-      ...weeklyRestaurantList,
-    ]
-      .sort((a, b) => {
-        if (
-          b.reviewCount !==
-          a.reviewCount
-        ) {
-          return (
-            b.reviewCount -
-            a.reviewCount
-          );
-        }
+    const mean = reviews.length > 0 ? total / reviews.length : 3;
+    const byScore = (a: Ranked, b: Ranked) => b.score - a.score || b.count - a.count;
 
-        return (
-          b.averageRating -
-          a.averageRating
-        );
-      })
-      .slice(0, 5);
+    // Restaurant cards link to their most reviewed location; chains say how
+    // many locations people reviewed instead of a city.
+    const rankedRestaurants = rank(restaurants, mean).map((stats) => ({
+      ...stats,
+      id: topLocation(stats),
+      subtitle:
+        stats.locations.size > 1
+          ? `${stats.locations.size} locations`
+          : stats.subtitle,
+    }));
+    const rankedLocations = rank(locations, mean).filter(
+      (stats) => stats.latitude !== null && stats.longitude !== null
+    );
+    const rankedDishes = rank(dishes, mean).map((stats) => ({
+      ...stats,
+      id: topLocation(stats),
+    }));
 
-    setTrendingRestaurants(
-      trendingByWeek
+    setMapRestaurants(
+      rankedLocations.map((stats) => ({
+        id: stats.id,
+        name: stats.name,
+        latitude: stats.latitude!,
+        longitude: stats.longitude!,
+        rating: stats.averageRating,
+        meta: reviewsText(stats.count),
+        subtitle: stats.subtitle,
+        photoPath: stats.photoPath,
+      }))
     );
 
-    const restaurantsByRating = [
-      ...restaurantList,
-    ].sort((a, b) => {
-      if (
-        b.averageRating !==
-        a.averageRating
-      ) {
-        return (
-          b.averageRating -
-          a.averageRating
-        );
-      }
-
-      return (
-        b.reviewCount -
-        a.reviewCount
-      );
-    });
-
-    const dishesByRating = [
-      ...dishList,
-    ].sort((a, b) => {
-      if (
-        b.averageRating !==
-        a.averageRating
-      ) {
-        return (
-          b.averageRating -
-          a.averageRating
-        );
-      }
-
-      return (
-        b.reviewCount -
-        a.reviewCount
-      );
-    });
-
-    const restaurantsByReviews = [
-      ...restaurantList,
-    ].sort(
-      (a, b) =>
-        b.reviewCount -
-        a.reviewCount
+    setNearby(
+      location
+        ? rankedLocations
+            .map((stats) => ({
+              ...stats,
+              distanceMiles: getDistanceMiles(location, {
+                latitude: stats.latitude!,
+                longitude: stats.longitude!,
+              }),
+            }))
+            .filter((stats) => stats.distanceMiles <= NEARBY_MILES)
+            .sort(byScore)
+            .slice(0, ROW_COUNT)
+        : []
     );
 
-    const dishesByReviews = [
-      ...dishList,
-    ].sort(
-      (a, b) =>
-        b.reviewCount -
-        a.reviewCount
+    const top = [...rankedRestaurants].sort(byScore);
+    setTopRestaurants(top.slice(0, ROW_COUNT));
+
+    setTrending(
+      rankedRestaurants
+        .filter((stats) => stats.weekCount > 0)
+        .sort((a, b) => b.weekCount - a.weekCount || byScore(a, b))
+        .slice(0, ROW_COUNT)
     );
 
-    setTopRestaurants(
-      restaurantsByRating.slice(0, 5)
+    // Loved by the few who've been: well rated, not many reviews yet, and
+    // not already in Top restaurants.
+    const topIds = new Set(top.slice(0, ROW_COUNT).map((stats) => stats.id));
+    setHiddenGems(
+      rankedRestaurants
+        .filter(
+          (stats) =>
+            stats.count >= 2 &&
+            stats.count <= 8 &&
+            stats.averageRating >= 4 &&
+            !topIds.has(stats.id)
+        )
+        .sort((a, b) => b.averageRating - a.averageRating)
+        .slice(0, ROW_COUNT)
     );
 
-    setTopDishes(
-      dishesByRating.slice(0, 5)
-    );
+    setTopDishes([...rankedDishes].sort(byScore).slice(0, ROW_COUNT));
 
-    setMostReviewedRestaurants(
-      restaurantsByReviews.slice(0, 5)
-    );
-
-    setMostReviewedDishes(
-      dishesByReviews.slice(0, 5)
-    );
-
+    loadedAt.current = Date.now();
     setExploreLoading(false);
   }
 
-  async function loadTags() {
-    try {
-      setAllTags(await fetchTags());
-    } catch (error) {
-      console.log('Could not load tags:', error);
-    }
-  }
-
-  async function selectTag(slug: string | null) {
-    setSelectedTag(slug);
-    setTagDishes([]);
-
-    if (!slug) {
+  async function selectTag(slug: string) {
+    if (slug === selectedTag) {
+      setSelectedTag(null);
       return;
     }
 
+    setSelectedTag(slug);
+    setTagDishes([]);
     setTagLoading(true);
 
-    const { data, error } = await supabase.rpc(
-      'top_dishes_by_tag',
-      { p_tag: slug }
-    );
-
-    setTagLoading(false);
+    const { data, error } = await supabase.rpc('top_dishes_by_tag', {
+      p_tag: slug,
+    });
 
     if (error) {
+      setTagLoading(false);
       console.log('Top dishes by tag error:', error.message);
       return;
     }
 
+    const rows = (data ?? []) as TagDish[];
+
+    // The best photo of each dish.
+    const { data: photoData } =
+      rows.length > 0
+        ? await supabase
+            .from('reviews')
+            .select('dish_id, photo_path')
+            .in(
+              'dish_id',
+              rows.map((row) => row.dish_id)
+            )
+            .not('photo_path', 'is', null)
+            .order('rating', { ascending: false })
+        : { data: [] };
+
+    const photoByDish = new Map<string, string>();
+    for (const row of photoData ?? []) {
+      if (!photoByDish.has(row.dish_id as string)) {
+        photoByDish.set(row.dish_id as string, row.photo_path as string);
+      }
+    }
+
     setTagDishes(
-      (data ?? []).map(
-        (row: {
-          dish_id: string;
-          name: string;
-          restaurant_name: string;
-          average_rating: number;
-          review_count: number;
-        }) => ({
-          id: row.dish_id,
-          name: row.name,
-          restaurantName: row.restaurant_name,
-          city: null,
-          averageRating: Number(row.average_rating),
-          reviewCount: row.review_count,
-        })
-      )
+      rows.map((row, index) => ({
+        key: row.dish_id,
+        title: row.name,
+        subtitle: row.restaurant_name,
+        rating: Number(row.average_rating),
+        meta: reviewsText(row.review_count),
+        photoPath: photoByDish.get(row.dish_id) ?? null,
+        badge: `#${index + 1}`,
+        onPress: () =>
+          router.push({ pathname: '/dish/[id]', params: { id: row.dish_id } }),
+      }))
     );
+    setTagLoading(false);
   }
 
-  function renderRankedDish(
-    dish: ExploreDish,
-    index: number
-  ) {
-    return (
-      <TouchableOpacity
-        key={dish.id}
-        style={styles.rankingRow}
-        onPress={() =>
-          router.push({
-            pathname: '/dish/[id]',
-            params: {
-              id: dish.id,
-            },
-          })
-        }
-      >
-        <Text style={styles.rankNumber}>
-          {index + 1}
-        </Text>
-
-        <View style={styles.rankingInfo}>
-          <Text style={styles.rankingName}>
-            {dish.name}
-          </Text>
-
-          <Text style={styles.rankingSubtext}>
-            {dish.restaurantName}
-
-            {dish.city ? ` · ${dish.city}` : ''}
-          </Text>
-        </View>
-
-        <Text style={styles.rankingRating}>
-          {dish.averageRating.toFixed(1)}★
-        </Text>
-      </TouchableOpacity>
-    );
-  }
-
-  function clearResults() {
-    setUserResults([]);
-    setRestaurantResults([]);
-    setDishResults([]);
-  }
-
-  async function handleSearch(text: string) {
-    setQuery(text);
-
-    const trimmed = text.trim();
-
-    if (trimmed.length < 2) {
-      clearResults();
-      return;
-    }
-
-    await runSearch(
-      trimmed,
-      searchType
-    );
-  }
-
-  async function changeSearchType(
-    type: SearchType
-  ) {
-    setSearchType(type);
-
-    const trimmed =
-      query.trim();
-
-    if (trimmed.length < 2) {
-      clearResults();
-      return;
-    }
-
-    await runSearch(
-      trimmed,
-      type
-    );
-  }
-
-  async function runSearch(
-    searchText: string,
-    type: SearchType
-  ) {
+  async function runSearch(searchText: string, type: SearchType) {
     setSearchLoading(true);
 
     if (type === 'users') {
-      const { data, error } =
-        await supabase
-          .from('profiles')
-          .select(
-            'id, username, display_name, avatar_path'
-          )
-          .or(
-            `username.ilike.%${searchText}%,display_name.ilike.%${searchText}%`
-          )
-          .limit(20);
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, username, display_name, avatar_path')
+        .or(`username.ilike.%${searchText}%,display_name.ilike.%${searchText}%`)
+        .limit(20);
 
       setSearchLoading(false);
 
       if (error) {
-        Alert.alert(
-          'Search error',
-          error.message
-        );
-
+        Alert.alert('Search error', error.message);
         return;
       }
 
-      setUserResults(
-        await withoutHiddenUsers(data ?? [], (result) => result.id)
-      );
-      setRestaurantResults([]);
-      setDishResults([]);
-
+      setUserResults(await withoutHiddenUsers(data ?? [], (result) => result.id));
       return;
     }
 
     if (type === 'restaurants') {
-      const { data, error } =
-        await supabase
-          .from('restaurants')
-          .select(
-            'id, name, city, state'
-          )
-          .or(
-            `name.ilike.%${searchText}%,city.ilike.%${searchText}%,state.ilike.%${searchText}%`
-          )
-          .limit(20);
+      const { data, error } = await supabase
+        .from('restaurants')
+        .select('id, name, city, state')
+        .or(
+          `name.ilike.%${searchText}%,city.ilike.%${searchText}%,state.ilike.%${searchText}%`
+        )
+        .limit(20);
 
       setSearchLoading(false);
 
       if (error) {
-        Alert.alert(
-          'Search error',
-          error.message
-        );
-
+        Alert.alert('Search error', error.message);
         return;
       }
 
-      setRestaurantResults(
-        data ?? []
-      );
-
-      setUserResults([]);
-      setDishResults([]);
-
+      setRestaurantResults(data ?? []);
       return;
     }
 
-    const { data, error } =
-      await supabase
-        .from('dishes')
-        .select(`
-          id,
-          name,
-          restaurants (
-            id,
-            name,
-            city
-          )
-        `)
-        .ilike(
-          'name',
-          `%${searchText}%`
-        )
-        .limit(20);
+    const { data, error } = await supabase
+      .from('dishes')
+      .select('id, name, restaurants (id, name, city)')
+      .ilike('name', `%${searchText}%`)
+      .limit(20);
 
     setSearchLoading(false);
 
     if (error) {
-      Alert.alert(
-        'Search error',
-        error.message
-      );
-
+      Alert.alert('Search error', error.message);
       return;
     }
 
-    setDishResults(
-      (data ?? []) as unknown as
-        DishResult[]
-    );
-
-    setUserResults([]);
-    setRestaurantResults([]);
+    setDishResults((data ?? []) as unknown as DishResult[]);
   }
 
-  async function toggleFollow(
-    profileId: string
-  ) {
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+  function handleSearch(text: string) {
+    setQuery(text);
 
-    if (userError || !user) {
-      Alert.alert(
-        'Error',
-        'You must be signed in.'
-      );
-
-      return;
+    if (text.trim().length >= 2) {
+      runSearch(text.trim(), searchType);
     }
+  }
 
-    if (user.id === profileId) {
-      Alert.alert(
-        'Not allowed',
-        'You cannot follow yourself.'
-      );
+  function changeSearchType(type: SearchType) {
+    setSearchType(type);
 
-      return;
+    if (query.trim().length >= 2) {
+      runSearch(query.trim(), type);
     }
+  }
 
-    const isFollowing =
-      followingIds.includes(
-        profileId
-      );
+  async function toggleFollow(profileId: string) {
+    if (!currentUserId || currentUserId === profileId) return;
 
-    if (isFollowing) {
-      const { error } =
-        await supabase
+    const isFollowing = followingIds.includes(profileId);
+
+    const { error } = isFollowing
+      ? await supabase
           .from('follows')
           .delete()
-          .eq(
-            'follower_id',
-            user.id
-          )
-          .eq(
-            'following_id',
-            profileId
-          );
-
-      if (error) {
-        Alert.alert(
-          'Unfollow error',
-          error.message
-        );
-
-        return;
-      }
-
-      setFollowingIds(
-        (current) =>
-          current.filter(
-            (id) =>
-              id !== profileId
-          )
-      );
-
-      return;
-    }
-
-    const { error } =
-      await supabase
-        .from('follows')
-        .insert({
-          follower_id:
-            user.id,
-          following_id:
-            profileId,
-        });
+          .eq('follower_id', currentUserId)
+          .eq('following_id', profileId)
+      : await supabase
+          .from('follows')
+          .insert({ follower_id: currentUserId, following_id: profileId });
 
     if (error) {
-      Alert.alert(
-        'Follow error',
-        error.message
-      );
-
+      Alert.alert(isFollowing ? 'Unfollow error' : 'Follow error', error.message);
       return;
     }
 
-    setFollowingIds(
-      (current) => [
-        ...current,
-        profileId,
-      ]
+    setFollowingIds((current) =>
+      isFollowing
+        ? current.filter((id) => id !== profileId)
+        : [...current, profileId]
     );
   }
 
-  function getPlaceholder() {
+  async function refresh() {
+    setRefreshing(true);
+    await loadExplore('refresh');
+    setRefreshing(false);
+  }
+
+  function openRestaurant(id: string) {
+    router.push({ pathname: '/restaurant/[id]', params: { id } });
+  }
+
+  function restaurantCards(list: Ranked[], meta?: (stats: Ranked) => string) {
+    return list.map<PhotoCard>((stats) => ({
+      key: stats.id,
+      title: stats.name,
+      subtitle: stats.subtitle,
+      rating: stats.averageRating,
+      meta: meta ? meta(stats) : reviewsText(stats.count),
+      photoPath: stats.photoPath,
+      onPress: () => openRestaurant(stats.id),
+    }));
+  }
+
+  function renderSection(
+    title: string,
+    subtitle: string | null,
+    cards: PhotoCard[],
+    size: 'large' | 'medium' = 'medium'
+  ) {
+    if (cards.length === 0) return null;
+
+    return (
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        {subtitle ? <Text style={styles.sectionSubtitle}>{subtitle}</Text> : null}
+        <View style={styles.rowSpacing}>
+          <PhotoCardRow cards={cards} size={size} />
+        </View>
+      </View>
+    );
+  }
+
+  function renderSearchResults() {
+    if (searchLoading) {
+      return <ActivityIndicator style={styles.loading} color={Palette.accent} />;
+    }
+
     if (searchType === 'users') {
-      return 'Search username or name';
+      if (userResults.length === 0) {
+        return <Text style={styles.noResults}>No people found.</Text>;
+      }
+
+      return userResults.map((user) => {
+        const isOwnProfile = user.id === currentUserId;
+        const following = followingIds.includes(user.id);
+
+        return (
+          <View key={user.id} style={styles.resultRow}>
+            <TouchableOpacity
+              style={styles.resultInfo}
+              onPress={() =>
+                isOwnProfile
+                  ? router.push('/profile')
+                  : router.push({ pathname: '/user/[id]', params: { id: user.id } })
+              }
+            >
+              {user.avatar_path ? (
+                <Image
+                  source={{
+                    uri: supabase.storage
+                      .from('profile-photos')
+                      .getPublicUrl(user.avatar_path).data.publicUrl,
+                  }}
+                  style={styles.resultIcon}
+                  contentFit="cover"
+                />
+              ) : (
+                <View style={styles.resultIcon}>
+                  <Text style={styles.resultIconText}>
+                    {(user.display_name || user.username || 'U')
+                      .charAt(0)
+                      .toUpperCase()}
+                  </Text>
+                </View>
+              )}
+
+              <View style={styles.resultText}>
+                <Text style={styles.primaryText}>
+                  {user.display_name || user.username}
+                  {isOwnProfile ? ' · You' : ''}
+                </Text>
+                <Text style={styles.secondaryText}>@{user.username}</Text>
+              </View>
+            </TouchableOpacity>
+
+            {!isOwnProfile ? (
+              <TouchableOpacity
+                style={[styles.followButton, following && styles.followingButton]}
+                onPress={() => toggleFollow(user.id)}
+              >
+                <Text style={styles.followButtonText}>
+                  {following ? 'Following' : 'Follow'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        );
+      });
     }
 
-    if (
-      searchType ===
-      'restaurants'
-    ) {
-      return 'Search restaurant or city';
+    if (searchType === 'restaurants') {
+      if (restaurantResults.length === 0) {
+        return <Text style={styles.noResults}>No restaurants found.</Text>;
+      }
+
+      return restaurantResults.map((restaurant) => (
+        <TouchableOpacity
+          key={restaurant.id}
+          style={styles.resultRow}
+          onPress={() => openRestaurant(restaurant.id)}
+        >
+          <View style={styles.resultIcon}>
+            <Text style={styles.resultEmoji}>🍽️</Text>
+          </View>
+          <View style={styles.resultText}>
+            <Text style={styles.primaryText}>{restaurant.name}</Text>
+            {locationText(restaurant.city, restaurant.state) ? (
+              <Text style={styles.secondaryText}>
+                {locationText(restaurant.city, restaurant.state)}
+              </Text>
+            ) : null}
+          </View>
+          <Text style={styles.chevron}>›</Text>
+        </TouchableOpacity>
+      ));
     }
 
-    return 'Search dish';
+    if (dishResults.length === 0) {
+      return <Text style={styles.noResults}>No dishes found.</Text>;
+    }
+
+    return dishResults.map((dish) => (
+      <TouchableOpacity
+        key={dish.id}
+        style={styles.resultRow}
+        onPress={() =>
+          router.push({ pathname: '/dish/[id]', params: { id: dish.id } })
+        }
+      >
+        <View style={styles.resultIcon}>
+          <Text style={styles.resultEmoji}>🍴</Text>
+        </View>
+        <View style={styles.resultText}>
+          <Text style={styles.primaryText}>{dish.name}</Text>
+          <Text style={styles.secondaryText}>
+            {dish.restaurants?.name ?? 'Unknown restaurant'}
+            {dish.restaurants?.city ? ` · ${dish.restaurants.city}` : ''}
+          </Text>
+        </View>
+        <Text style={styles.chevron}>›</Text>
+      </TouchableOpacity>
+    ));
   }
 
-  function getLocationText(
-    city: string | null,
-    state: string | null
-  ) {
-    return [city, state]
-      .filter(Boolean)
-      .join(', ');
+  function renderBrowse() {
+    const selectedCategory = categories.find((tag) => tag.slug === selectedTag);
+
+    return (
+      <>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categories}
+        >
+          {categories.map((tag) => {
+            const selected = tag.slug === selectedTag;
+
+            return (
+              <TouchableOpacity
+                key={tag.slug}
+                style={[styles.category, selected && styles.categorySelected]}
+                onPress={() => selectTag(tag.slug)}
+              >
+                <Text style={styles.categoryEmoji}>
+                  {TAG_EMOJI[tag.slug] ?? '🍽️'}
+                </Text>
+                <Text
+                  style={[styles.categoryLabel, selected && styles.categoryLabelSelected]}
+                  numberOfLines={2}
+                >
+                  {tag.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        {selectedCategory ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Best {selectedCategory.label}</Text>
+            {tagLoading ? (
+              <ActivityIndicator style={styles.loading} color={Palette.accent} />
+            ) : tagDishes.length > 0 ? (
+              <View style={styles.rowSpacing}>
+                <PhotoCardRow cards={tagDishes} />
+              </View>
+            ) : (
+              <Text style={styles.emptyText}>
+                Nothing here yet. Dishes show up once they&apos;re tagged{' '}
+                {selectedCategory.label}.
+              </Text>
+            )}
+          </View>
+        ) : null}
+
+        {exploreLoading ? (
+          <ActivityIndicator style={styles.loading} color={Palette.accent} />
+        ) : (
+          <>
+            {userLocation ? (
+              renderSection(
+                'Best near you',
+                `Top rated within ${NEARBY_MILES} miles`,
+                nearby.map((spot) => ({
+                  key: spot.id,
+                  title: spot.name,
+                  subtitle: spot.subtitle,
+                  rating: spot.averageRating,
+                  meta: `${spot.distanceMiles < 10 ? spot.distanceMiles.toFixed(1) : Math.round(spot.distanceMiles)} mi`,
+                  photoPath: spot.photoPath,
+                  onPress: () => openRestaurant(spot.id),
+                })),
+                'large'
+              )
+            ) : (
+              <TouchableOpacity style={styles.locationPrompt} onPress={() => loadExplore('ask-location')}
+              >
+                <Text style={styles.locationPromptTitle}>📍 See what’s good near you</Text>
+                <Text style={styles.locationPromptText}>
+                  Allow location to get the best spots around you.
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {renderSection(
+              'What friends are eating',
+              null,
+              friendReviews.map((review) => ({
+                key: review.id,
+                title: review.dishes?.name ?? 'A dish',
+                subtitle: `${review.profiles?.display_name || review.profiles?.username || 'Someone'} · ${
+                  review.dishes?.restaurants?.brands?.name ??
+                  review.dishes?.restaurants?.name ??
+                  ''
+                }`,
+                rating: Number(review.rating),
+                photoPath: review.photo_path,
+                onPress: () =>
+                  router.push({ pathname: '/review/[id]', params: { id: review.id } }),
+              }))
+            )}
+
+            {renderSection(
+              'Trending this week',
+              'Getting the most reviews right now',
+              restaurantCards(
+                trending,
+                (stats) => `${stats.weekCount} this week`
+              )
+            )}
+
+            {renderSection(
+              'Top dishes',
+              null,
+              topDishes.map((stats, index) => ({
+                key: stats.id,
+                title: stats.name,
+                subtitle: stats.subtitle,
+                rating: stats.averageRating,
+                meta: reviewsText(stats.count),
+                photoPath: stats.photoPath,
+                badge: `#${index + 1}`,
+                onPress: () =>
+                  router.push({ pathname: '/dish/[id]', params: { id: stats.id } }),
+              }))
+            )}
+
+            {renderSection(
+              'Hidden gems',
+              'Loved by the few who’ve been',
+              restaurantCards(hiddenGems)
+            )}
+
+            {renderSection(
+              'Top restaurants',
+              null,
+              restaurantCards(topRestaurants).map((card, index) => ({
+                ...card,
+                badge: `#${index + 1}`,
+              }))
+            )}
+          </>
+        )}
+      </>
+    );
   }
 
-  function getProfilePhotoUrl(
-    path: string
-  ) {
-    const { data } =
-      supabase.storage
-        .from('profile-photos')
-        .getPublicUrl(path);
-
-    return data.publicUrl;
-  }
-
-  const isSearching =
-    query.trim().length >= 2;
+  const isSearching = query.trim().length >= 2;
 
   return (
-    <ScrollView
-      contentContainerStyle={
-        styles.container
-      }
-      keyboardShouldPersistTaps="handled"
-    >
-      <Text style={styles.title}>
-        Discover
-      </Text>
+    <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Discover</Text>
 
-      <Text style={styles.subtitle}>
-        Find people, restaurants, and dishes.
-      </Text>
-
-      <View style={styles.tabs}>
-        <TouchableOpacity
-          style={[
-            styles.tab,
-            searchType === 'users' &&
-              styles.activeTab,
-          ]}
-          onPress={() =>
-            changeSearchType('users')
-          }
-        >
-          <Text
-            style={[
-              styles.tabText,
-              searchType === 'users' &&
-                styles.activeTabText,
-            ]}
-          >
-            Users
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[
-            styles.tab,
-            searchType ===
-              'restaurants' &&
-              styles.activeTab,
-          ]}
-          onPress={() =>
-            changeSearchType(
-              'restaurants'
-            )
-          }
-        >
-          <Text
-            style={[
-              styles.tabText,
-              searchType ===
-                'restaurants' &&
-                styles.activeTabText,
-            ]}
-          >
-            Restaurants
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[
-            styles.tab,
-            searchType === 'dishes' &&
-              styles.activeTab,
-          ]}
-          onPress={() =>
-            changeSearchType('dishes')
-          }
-        >
-          <Text
-            style={[
-              styles.tabText,
-              searchType === 'dishes' &&
-                styles.activeTabText,
-            ]}
-          >
-            Dishes
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.modeSwitch}>
+          {(['list', 'map'] as const).map((option) => (
+            <TouchableOpacity
+              key={option}
+              style={[styles.modeOption, mode === option && styles.modeOptionActive]}
+              onPress={() => setMode(option)}
+            >
+              <Text style={[styles.modeText, mode === option && styles.modeTextActive]}>
+                {option === 'list' ? 'List' : 'Map'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
-      <TextInput
-        style={styles.input}
-        placeholder={
-          getPlaceholder()
-        }
-        placeholderTextColor={Palette.textMuted}
-        autoCapitalize="none"
-        value={query}
-        onChangeText={handleSearch}
-      />
+      <View style={styles.searchBox}>
+        <Text style={styles.searchIcon}>⌕</Text>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search restaurants, dishes, people"
+          placeholderTextColor={Palette.textMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          value={query}
+          onChangeText={handleSearch}
+          returnKeyType="search"
+        />
+        {query ? (
+          <TouchableOpacity onPress={() => setQuery('')} hitSlop={10}>
+            <Text style={styles.searchClear}>✕</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
 
-      {searchLoading ? (
-        <Text style={styles.statusText}>
-          Searching...
-        </Text>
+      {isSearching ? (
+        <View style={styles.searchTabs}>
+          {(['restaurants', 'dishes', 'users'] as const).map((type) => (
+            <TouchableOpacity
+              key={type}
+              style={[styles.searchTab, searchType === type && styles.searchTabActive]}
+              onPress={() => changeSearchType(type)}
+            >
+              <Text
+                style={[
+                  styles.searchTabText,
+                  searchType === type && styles.searchTabTextActive,
+                ]}
+              >
+                {type === 'users' ? 'People' : type === 'restaurants' ? 'Restaurants' : 'Dishes'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       ) : null}
 
       {isSearching ? (
-        <>
-          {!searchLoading &&
-          searchType === 'users' &&
-          userResults.length === 0 ? (
-            <Text style={styles.noResults}>
-              No users found.
-            </Text>
-          ) : null}
-
-          {!searchLoading &&
-          searchType ===
-            'restaurants' &&
-          restaurantResults.length ===
-            0 ? (
-            <Text style={styles.noResults}>
-              No restaurants found.
-            </Text>
-          ) : null}
-
-          {!searchLoading &&
-          searchType === 'dishes' &&
-          dishResults.length === 0 ? (
-            <Text style={styles.noResults}>
-              No dishes found.
-            </Text>
-          ) : null}
-
-          {searchType === 'users'
-            ? userResults.map(
-                (user) => {
-                  const isOwnProfile =
-                    user.id ===
-                    currentUserId;
-
-                  return (
-                    <View
-                      key={user.id}
-                      style={
-                        styles.resultRow
-                      }
-                    >
-                      <TouchableOpacity
-                        style={
-                          styles.resultInfo
-                        }
-                        onPress={() => {
-                          if (
-                            isOwnProfile
-                          ) {
-                            router.push(
-                              '/profile'
-                            );
-                          } else {
-                            router.push({
-                              pathname:
-                                '/user/[id]',
-                              params: {
-                                id: user.id,
-                              },
-                            });
-                          }
-                        }}
-                      >
-                        {user.avatar_path ? (
-                          <Image
-                            source={{
-                              uri: getProfilePhotoUrl(
-                                user.avatar_path
-                              ),
-                            }}
-                            style={
-                              styles.avatarImage
-                            }
-                            resizeMode="cover"
-                          />
-                        ) : (
-                          <View
-                            style={
-                              styles.avatar
-                            }
-                          >
-                            <Text
-                              style={
-                                styles.avatarText
-                              }
-                            >
-                              {(
-                                user.display_name ||
-                                user.username ||
-                                'U'
-                              )
-                                .charAt(0)
-                                .toUpperCase()}
-                            </Text>
-                          </View>
-                        )}
-
-                        <View
-                          style={
-                            styles.textArea
-                          }
-                        >
-                          <Text
-                            style={
-                              styles.primaryText
-                            }
-                          >
-                            {user.display_name ||
-                              user.username}
-
-                            {isOwnProfile
-                              ? ' · You'
-                              : ''}
-                          </Text>
-
-                          <Text
-                            style={
-                              styles.handleText
-                            }
-                          >
-                            @{user.username}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-
-                      {!isOwnProfile ? (
-                        <TouchableOpacity
-                          style={[
-                            styles.followButton,
-                            followingIds.includes(
-                              user.id
-                            ) &&
-                              styles.followingButton,
-                          ]}
-                          onPress={() =>
-                            toggleFollow(
-                              user.id
-                            )
-                          }
-                        >
-                          <Text
-                            style={[
-                              styles.followButtonText,
-                              followingIds.includes(
-                                user.id
-                              ) &&
-                                styles.followingButtonText,
-                            ]}
-                          >
-                            {followingIds.includes(
-                              user.id
-                            )
-                              ? 'Following'
-                              : 'Follow'}
-                          </Text>
-                        </TouchableOpacity>
-                      ) : null}
-                    </View>
-                  );
-                }
-              )
-            : null}
-
-          {searchType ===
-          'restaurants'
-            ? restaurantResults.map(
-                (restaurant) => {
-                  const location =
-                    getLocationText(
-                      restaurant.city,
-                      restaurant.state
-                    );
-
-                  return (
-                    <TouchableOpacity
-                      key={
-                        restaurant.id
-                      }
-                      style={
-                        styles.simpleResultRow
-                      }
-                      onPress={() =>
-                        router.push({
-                          pathname:
-                            '/restaurant/[id]',
-                          params: {
-                            id: restaurant.id,
-                          },
-                        })
-                      }
-                    >
-                      <View
-                        style={
-                          styles.iconCircle
-                        }
-                      >
-                        <Text
-                          style={
-                            styles.iconText
-                          }
-                        >
-                          🍽️
-                        </Text>
-                      </View>
-
-                      <View
-                        style={
-                          styles.textArea
-                        }
-                      >
-                        <Text
-                          style={
-                            styles.primaryText
-                          }
-                        >
-                          {restaurant.name}
-                        </Text>
-
-                        {location ? (
-                          <Text
-                            style={
-                              styles.secondaryText
-                            }
-                          >
-                            {location}
-                          </Text>
-                        ) : null}
-                      </View>
-
-                      <Text style={styles.chevron}>
-                        ›
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                }
-              )
-            : null}
-
-          {searchType === 'dishes'
-            ? dishResults.map(
-                (dish) => (
-                  <TouchableOpacity
-                    key={dish.id}
-                    style={
-                      styles.simpleResultRow
-                    }
-                    onPress={() =>
-                      router.push({
-                        pathname:
-                          '/dish/[id]',
-                        params: {
-                          id: dish.id,
-                        },
-                      })
-                    }
-                  >
-                    <View
-                      style={
-                        styles.iconCircle
-                      }
-                    >
-                      <Text
-                        style={
-                          styles.iconText
-                        }
-                      >
-                        🍴
-                      </Text>
-                    </View>
-
-                    <View
-                      style={
-                        styles.textArea
-                      }
-                    >
-                      <Text
-                        style={
-                          styles.primaryText
-                        }
-                      >
-                        {dish.name}
-                      </Text>
-
-                      <Text
-                        style={
-                          styles.secondaryText
-                        }
-                      >
-                        {dish.restaurants
-                          ?.name ??
-                          'Unknown restaurant'}
-
-                        {dish.restaurants
-                          ?.city
-                          ? ` · ${dish.restaurants.city}`
-                          : ''}
-                      </Text>
-                    </View>
-
-                    <Text style={styles.chevron}>
-                      ›
-                    </Text>
-                  </TouchableOpacity>
-                )
-              )
-            : null}
-        </>
+        <ScrollView
+          contentContainerStyle={styles.results}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
+          {renderSearchResults()}
+        </ScrollView>
+      ) : mode === 'map' ? (
+        exploreLoading ? (
+          <ActivityIndicator style={styles.loading} color={Palette.accent} />
+        ) : (
+          <RestaurantMap restaurants={mapRestaurants} userLocation={userLocation} />
+        )
       ) : (
-        <View style={styles.exploreArea}>
-          <Text style={styles.exploreTitle}>
-            Explore
-          </Text>
-
-          {exploreLoading ? (
-            <ActivityIndicator
-              size="small"
-              style={styles.exploreLoader}
+        <ScrollView
+          contentContainerStyle={styles.browse}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={refresh}
+              tintColor={Palette.accent}
             />
-          ) : (
-            <>
-              <View style={styles.nearbyHeader}>
-                <View>
-                  <Text style={styles.sectionTitle}>
-                    Top Near You
-                  </Text>
-
-                  <Text
-                    style={styles.sectionSubtitle}
-                  >
-                    Within 25 miles
-                  </Text>
-                </View>
-              </View>
-
-              {!locationAllowed ? (
-                <View style={styles.locationMessage}>
-                  <Text
-                    style={
-                      styles.locationMessageTitle
-                    }
-                  >
-                    Location unavailable
-                  </Text>
-
-                  <Text
-                    style={
-                      styles.locationMessageText
-                    }
-                  >
-                    Allow location access to see
-                    restaurants near you.
-                  </Text>
-                </View>
-              ) : nearbyRestaurants.length === 0 ? (
-                <View style={styles.locationMessage}>
-                  <Text
-                    style={
-                      styles.locationMessageTitle
-                    }
-                  >
-                    No nearby restaurants yet
-                  </Text>
-
-                  <Text
-                    style={
-                      styles.locationMessageText
-                    }
-                  >
-                    Restaurants need saved coordinates
-                    before they can appear here.
-                  </Text>
-                </View>
-              ) : (
-                nearbyRestaurants.map(
-                  (restaurant, index) => (
-                    <TouchableOpacity
-                      key={restaurant.id}
-                      style={styles.rankingRow}
-                      onPress={() =>
-                        router.push({
-                          pathname:
-                            '/restaurant/[id]',
-                          params: {
-                            id: restaurant.id,
-                          },
-                        })
-                      }
-                    >
-                      <Text style={styles.rankNumber}>
-                        {index + 1}
-                      </Text>
-
-                      <View
-                        style={styles.rankingInfo}
-                      >
-                        <Text
-                          style={styles.rankingName}
-                        >
-                          {restaurant.name}
-                        </Text>
-
-                        <Text
-                          style={
-                            styles.rankingSubtext
-                          }
-                        >
-                          {getLocationText(
-                            restaurant.city,
-                            restaurant.state
-                          ) || 'Location unknown'}
-
-                          {' · '}
-
-                          {restaurant.distanceMiles <
-                          0.1
-                            ? '<0.1'
-                            : restaurant.distanceMiles.toFixed(
-                                1
-                              )}{' '}
-                          mi away
-                        </Text>
-                      </View>
-
-                      <View
-                        style={
-                          styles.nearbyRatingArea
-                        }
-                      >
-                        <Text
-                          style={
-                            styles.rankingRating
-                          }
-                        >
-                          {restaurant.averageRating.toFixed(
-                            1
-                          )}
-                          ★
-                        </Text>
-
-                        <Text
-                          style={
-                            styles.nearbyReviewCount
-                          }
-                        >
-                          {restaurant.reviewCount}{' '}
-                          {restaurant.reviewCount ===
-                          1
-                            ? 'review'
-                            : 'reviews'}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  )
-                )
-              )}
-
-              <View
-                style={styles.trendingHeader}
-              >
-                <Text style={styles.sectionTitle}>
-                  Trending This Week
-                </Text>
-
-                <Text
-                  style={styles.sectionSubtitle}
-                >
-                  Most activity in the last 7 days
-                </Text>
-              </View>
-
-              {trendingRestaurants.length === 0 ? (
-                <View style={styles.locationMessage}>
-                  <Text
-                    style={
-                      styles.locationMessageTitle
-                    }
-                  >
-                    Nothing trending yet
-                  </Text>
-
-                  <Text
-                    style={
-                      styles.locationMessageText
-                    }
-                  >
-                    Restaurants will appear here as new
-                    reviews are logged this week.
-                  </Text>
-                </View>
-              ) : (
-                trendingRestaurants.map(
-                  (restaurant, index) => (
-                    <TouchableOpacity
-                      key={restaurant.id}
-                      style={styles.rankingRow}
-                      onPress={() =>
-                        router.push({
-                          pathname:
-                            '/restaurant/[id]',
-                          params: {
-                            id: restaurant.id,
-                          },
-                        })
-                      }
-                    >
-                      <Text style={styles.rankNumber}>
-                        {index + 1}
-                      </Text>
-
-                      <View
-                        style={styles.rankingInfo}
-                      >
-                        <Text
-                          style={styles.rankingName}
-                        >
-                          {restaurant.name}
-                        </Text>
-
-                        <Text
-                          style={
-                            styles.rankingSubtext
-                          }
-                        >
-                          {getLocationText(
-                            restaurant.city,
-                            restaurant.state
-                          ) || 'Location unknown'}
-                        </Text>
-                      </View>
-
-                      <View
-                        style={
-                          styles.nearbyRatingArea
-                        }
-                      >
-                        <Text
-                          style={
-                            styles.rankingRating
-                          }
-                        >
-                          {restaurant.averageRating.toFixed(
-                            1
-                          )}
-                          ★
-                        </Text>
-
-                        <Text
-                          style={
-                            styles.nearbyReviewCount
-                          }
-                        >
-                          {restaurant.reviewCount}{' '}
-                          {restaurant.reviewCount ===
-                          1
-                            ? 'review this week'
-                            : 'reviews this week'}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  )
-                )
-              )}
-
-              <Text
-                style={[
-                  styles.sectionTitle,
-                  styles.sectionSpacing,
-                ]}
-              >
-                Top Rated Restaurants
-              </Text>
-
-              {topRestaurants.map(
-                (restaurant, index) => (
-                  <TouchableOpacity
-                    key={restaurant.id}
-                    style={styles.rankingRow}
-                    onPress={() =>
-                      router.push({
-                        pathname:
-                          '/restaurant/[id]',
-                        params: {
-                          id: restaurant.id,
-                        },
-                      })
-                    }
-                  >
-                    <Text style={styles.rankNumber}>
-                      {index + 1}
-                    </Text>
-
-                    <View
-                      style={styles.rankingInfo}
-                    >
-                      <Text
-                        style={styles.rankingName}
-                      >
-                        {restaurant.name}
-                      </Text>
-
-                      <Text
-                        style={
-                          styles.rankingSubtext
-                        }
-                      >
-                        {getLocationText(
-                          restaurant.city,
-                          restaurant.state
-                        )
-                          ? `${getLocationText(
-                              restaurant.city,
-                              restaurant.state
-                            )} · `
-                          : ''}
-
-                        {restaurant.reviewCount}{' '}
-                        {restaurant.reviewCount === 1
-                          ? 'review'
-                          : 'reviews'}
-                      </Text>
-                    </View>
-
-                    <Text
-                      style={styles.rankingRating}
-                    >
-                      {restaurant.averageRating.toFixed(
-                        1
-                      )}
-                      ★
-                    </Text>
-                  </TouchableOpacity>
-                )
-              )}
-
-              <Text
-                style={[
-                  styles.sectionTitle,
-                  styles.sectionSpacing,
-                ]}
-              >
-                Top Rated Dishes
-              </Text>
-
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.tagChips}
-              >
-                {[{ slug: null, label: 'All' }, ...allTags].map(
-                  (tag) => {
-                    const selected = tag.slug === selectedTag;
-
-                    return (
-                      <TouchableOpacity
-                        key={tag.slug ?? 'all'}
-                        style={[
-                          styles.tagChip,
-                          selected && styles.tagChipSelected,
-                        ]}
-                        onPress={() => selectTag(tag.slug)}
-                      >
-                        <Text
-                          style={[
-                            styles.tagChipText,
-                            selected &&
-                              styles.tagChipTextSelected,
-                          ]}
-                        >
-                          {tag.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  }
-                )}
-              </ScrollView>
-
-              {!selectedTag ? (
-                topDishes.map(renderRankedDish)
-              ) : tagLoading ? (
-                <ActivityIndicator style={styles.tagLoading} />
-              ) : tagDishes.length > 0 ? (
-                tagDishes.map(renderRankedDish)
-              ) : (
-                <Text style={styles.tagEmptyText}>
-                  No top dishes here yet. A tag shows up once two
-                  people tag the same dish.
-                </Text>
-              )}
-
-              <Text
-                style={[
-                  styles.sectionTitle,
-                  styles.sectionSpacing,
-                ]}
-              >
-                Most Reviewed Restaurants
-              </Text>
-
-              {mostReviewedRestaurants.map(
-                (restaurant, index) => (
-                  <TouchableOpacity
-                    key={restaurant.id}
-                    style={styles.rankingRow}
-                    onPress={() =>
-                      router.push({
-                        pathname:
-                          '/restaurant/[id]',
-                        params: {
-                          id: restaurant.id,
-                        },
-                      })
-                    }
-                  >
-                    <Text style={styles.rankNumber}>
-                      {index + 1}
-                    </Text>
-
-                    <View
-                      style={styles.rankingInfo}
-                    >
-                      <Text
-                        style={styles.rankingName}
-                      >
-                        {restaurant.name}
-                      </Text>
-
-                      <Text
-                        style={
-                          styles.rankingSubtext
-                        }
-                      >
-                        {getLocationText(
-                          restaurant.city,
-                          restaurant.state
-                        ) || 'Location unknown'}
-                      </Text>
-                    </View>
-
-                    <Text style={styles.reviewCount}>
-                      {restaurant.reviewCount}{' '}
-                      {restaurant.reviewCount === 1
-                        ? 'review'
-                        : 'reviews'}
-                    </Text>
-                  </TouchableOpacity>
-                )
-              )}
-
-              <Text
-                style={[
-                  styles.sectionTitle,
-                  styles.sectionSpacing,
-                ]}
-              >
-                Most Reviewed Dishes
-              </Text>
-
-              {mostReviewedDishes.map(
-                (dish, index) => (
-                  <TouchableOpacity
-                    key={dish.id}
-                    style={styles.rankingRow}
-                    onPress={() =>
-                      router.push({
-                        pathname:
-                          '/dish/[id]',
-                        params: {
-                          id: dish.id,
-                        },
-                      })
-                    }
-                  >
-                    <Text style={styles.rankNumber}>
-                      {index + 1}
-                    </Text>
-
-                    <View
-                      style={styles.rankingInfo}
-                    >
-                      <Text
-                        style={styles.rankingName}
-                      >
-                        {dish.name}
-                      </Text>
-
-                      <Text
-                        style={
-                          styles.rankingSubtext
-                        }
-                      >
-                        {dish.restaurantName}
-                      </Text>
-                    </View>
-
-                    <Text style={styles.reviewCount}>
-                      {dish.reviewCount}{' '}
-                      {dish.reviewCount === 1
-                        ? 'review'
-                        : 'reviews'}
-                    </Text>
-                  </TouchableOpacity>
-                )
-              )}
-            </>
-          )}
-        </View>
+          }
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
+          {renderBrowse()}
+        </ScrollView>
       )}
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    padding: 24,
-    paddingTop: 70,
-    paddingBottom: 60,
+  screen: {
+    flex: 1,
     backgroundColor: Palette.background,
   },
-
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+  },
   title: {
     color: Palette.text,
     fontSize: 30,
     fontWeight: '700',
   },
-
-  subtitle: {
-    fontSize: 16,
-    color: Palette.textSecondary,
-    marginTop: 8,
-    marginBottom: 20,
-  },
-
-  tabs: {
+  modeSwitch: {
     flexDirection: 'row',
-    backgroundColor: Palette.surface,
+    padding: 3,
     borderRadius: 10,
-    padding: 4,
-    marginBottom: 16,
-  },
-
-  tab: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-
-  activeTab: {
-    backgroundColor: Palette.accent,
-  },
-
-  tabText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Palette.textSecondary,
-  },
-
-  activeTabText: {
-    color: Palette.text,
-  },
-
-  input: {
-    borderWidth: 1,
-    borderColor: Palette.borderStrong,
-    borderRadius: 10,
-    padding: 14,
-    fontSize: 16,
-    color: Palette.text,
-    marginBottom: 12,
-  },
-
-  statusText: {
-    fontSize: 14,
-    color: Palette.textMuted,
-    marginBottom: 10,
-  },
-
-  noResults: {
-    fontSize: 14,
-    color: Palette.textMuted,
-    marginTop: 8,
-  },
-
-  resultRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: Palette.border,
-  },
-
-  resultInfo: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingRight: 14,
-  },
-
-  simpleResultRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: Palette.border,
-  },
-
-  avatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: Palette.elevated,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-
-  avatarImage: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: Palette.elevated,
-    marginRight: 12,
-  },
-
-  avatarText: {
-    color: Palette.text,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-
-  iconCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
     backgroundColor: Palette.surface,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
   },
-
-  iconText: {
-    color: Palette.text,
-    fontSize: 18,
-  },
-
-  textArea: {
-    flex: 1,
-  },
-
-  primaryText: {
-    color: Palette.text,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-
-  handleText: {
-    color: Palette.accent,
-    fontSize: 13,
-    marginTop: 3,
-  },
-
-  secondaryText: {
-    fontSize: 13,
-    color: Palette.textSecondary,
-    marginTop: 3,
-  },
-
-  chevron: {
-    fontSize: 24,
-    color: Palette.textMuted,
-    marginLeft: 10,
-  },
-
-  followButton: {
-    backgroundColor: Palette.accent,
+  modeOption: {
     paddingHorizontal: 14,
-    paddingVertical: 9,
+    paddingVertical: 6,
     borderRadius: 8,
   },
-
-  followButtonText: {
-    color: Palette.text,
+  modeOptionActive: {
+    backgroundColor: Palette.elevated,
+  },
+  modeText: {
+    color: Palette.textMuted,
     fontSize: 14,
     fontWeight: '600',
   },
-
-  followingButton: {
-    backgroundColor: Palette.background,
-    borderWidth: 1,
-    borderColor: Palette.borderStrong,
-  },
-
-  followingButtonText: {
+  modeTextActive: {
     color: Palette.text,
   },
-
-  exploreArea: {
-    marginTop: 18,
-  },
-
-  exploreTitle: {
-    color: Palette.text,
-    fontSize: 24,
-    fontWeight: '700',
-    marginBottom: 22,
-  },
-
-  exploreLoader: {
-    marginTop: 20,
-  },
-
-  nearbyHeader: {
-    marginBottom: 8,
-  },
-
-  trendingHeader: {
-    marginTop: 30,
-    marginBottom: 8,
-  },
-
-  sectionTitle: {
-    color: Palette.text,
-    fontSize: 19,
-    fontWeight: '700',
-    marginBottom: 3,
-  },
-
-  sectionSubtitle: {
-    fontSize: 12,
-    color: Palette.textMuted,
-  },
-
-  sectionSpacing: {
-    marginTop: 30,
-  },
-
-  locationMessage: {
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 20,
+    marginTop: 14,
+    marginBottom: 6,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: Palette.surface,
     borderWidth: 1,
     borderColor: Palette.border,
-    borderRadius: 12,
-    padding: 14,
-    marginTop: 8,
   },
-
-  locationMessageTitle: {
-    color: Palette.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-
-  locationMessageText: {
-    fontSize: 13,
+  searchIcon: {
     color: Palette.textMuted,
-    marginTop: 4,
-    lineHeight: 18,
+    fontSize: 20,
+    marginRight: 8,
   },
-
-  tagChips: {
+  searchInput: {
+    flex: 1,
+    color: Palette.text,
+    fontSize: 16,
+    paddingVertical: 12,
+  },
+  searchClear: {
+    color: Palette.textMuted,
+    fontSize: 15,
+    paddingLeft: 8,
+  },
+  searchTabs: {
+    flexDirection: 'row',
     gap: 8,
-    paddingBottom: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
   },
-  tagChip: {
-    paddingHorizontal: 12,
+  searchTab: {
+    paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: Palette.borderStrong,
   },
-  tagChipSelected: {
+  searchTabActive: {
     backgroundColor: Palette.accent,
     borderColor: Palette.accent,
   },
-  tagChipText: {
-    fontSize: 13,
-    fontWeight: '600',
+  searchTabText: {
     color: Palette.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
   },
-  tagChipTextSelected: {
+  searchTabTextActive: {
     color: Palette.text,
   },
-  tagLoading: {
-    marginVertical: 16,
+  results: {
+    paddingHorizontal: 20,
+    paddingBottom: 60,
   },
-  tagEmptyText: {
-    fontSize: 14,
+  noResults: {
     color: Palette.textMuted,
-    lineHeight: 20,
-    paddingVertical: 8,
+    fontSize: 15,
+    marginTop: 16,
   },
-  rankingRow: {
+  resultRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: Palette.border,
   },
-
-  rankNumber: {
-    width: 28,
-    fontSize: 16,
-    fontWeight: '700',
-    color: Palette.textMuted,
-  },
-
-  rankingInfo: {
+  resultInfo: {
     flex: 1,
-    paddingRight: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-
-  rankingName: {
+  resultIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Palette.elevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  resultIconText: {
+    color: Palette.text,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  resultEmoji: {
+    fontSize: 20,
+  },
+  resultText: {
+    flex: 1,
+  },
+  primaryText: {
     color: Palette.text,
     fontSize: 16,
     fontWeight: '600',
   },
-
-  rankingSubtext: {
-    fontSize: 13,
+  secondaryText: {
     color: Palette.textMuted,
-    marginTop: 3,
+    fontSize: 13,
+    marginTop: 2,
   },
-
-  rankingRating: {
-    color: Palette.accent,
-    fontSize: 15,
+  chevron: {
+    color: Palette.textMuted,
+    fontSize: 24,
+    paddingLeft: 8,
+  },
+  followButton: {
+    backgroundColor: Palette.accent,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  followingButton: {
+    backgroundColor: Palette.background,
+    borderWidth: 1,
+    borderColor: Palette.borderStrong,
+  },
+  followButtonText: {
+    color: Palette.text,
+    fontSize: 14,
     fontWeight: '700',
   },
-
-  nearbyRatingArea: {
-    alignItems: 'flex-end',
+  browse: {
+    paddingTop: 10,
+    paddingBottom: 60,
   },
-
-  nearbyReviewCount: {
-    fontSize: 11,
-    color: Palette.textMuted,
-    marginTop: 3,
+  categories: {
+    gap: 10,
+    paddingHorizontal: 20,
   },
-
-  reviewCount: {
-    fontSize: 13,
+  category: {
+    width: 76,
+    height: 80,
+    borderRadius: 14,
+    backgroundColor: Palette.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1,
+    borderColor: Palette.surface,
+  },
+  categorySelected: {
+    borderColor: Palette.accent,
+    backgroundColor: Palette.elevated,
+  },
+  categoryEmoji: {
+    fontSize: 26,
+  },
+  categoryLabel: {
     color: Palette.textSecondary,
+    fontSize: 11,
     fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  categoryLabelSelected: {
+    color: Palette.text,
+  },
+  section: {
+    marginTop: 28,
+  },
+  sectionTitle: {
+    color: Palette.text,
+    fontSize: 21,
+    fontWeight: '700',
+    paddingHorizontal: 20,
+  },
+  sectionSubtitle: {
+    color: Palette.textMuted,
+    fontSize: 14,
+    paddingHorizontal: 20,
+    marginTop: 2,
+  },
+  rowSpacing: {
+    marginTop: 12,
+  },
+  emptyText: {
+    color: Palette.textMuted,
+    fontSize: 15,
+    paddingHorizontal: 20,
+    marginTop: 8,
+  },
+  loading: {
+    marginTop: 30,
+  },
+  locationPrompt: {
+    marginTop: 24,
+    marginHorizontal: 20,
+    padding: 16,
+    borderRadius: 14,
+    backgroundColor: Palette.surface,
+  },
+  locationPromptTitle: {
+    color: Palette.text,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  locationPromptText: {
+    color: Palette.textMuted,
+    fontSize: 14,
+    marginTop: 4,
   },
 });
