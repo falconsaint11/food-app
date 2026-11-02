@@ -16,6 +16,7 @@ import {
 
 import { ListsSection } from "@/components/lists-section";
 import { RatingsChart } from "@/components/ratings-chart";
+import { MyRatingsMap } from '@/components/my-ratings-map';
 import { latestPhotoPaths, TopPickCard } from "@/components/top-pick-card";
 import { Palette } from "@/constants/theme";
 
@@ -560,6 +561,8 @@ export default function ProfileScreen() {
           })
         )}
       </View>
+
+      <MyRatingsMap userId={profile.id} />
     </ScrollView>
   );
 }
