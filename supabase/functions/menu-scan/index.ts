@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
       },
     );
 
-    const { image, mediaType } = await req.json();
+    const { image, mediaType, restaurantId } = await req.json();
 
     if (
       typeof image !== "string" ||
@@ -74,10 +74,13 @@ Deno.serve(async (req) => {
       return json({ error: "Send one JPEG, PNG or WebP image under 5 MB." }, 400);
     }
 
-    // Checks the user is a curator or admin and counts the scan toward
-    // their daily limit (see claim_menu_scan()). After the image check, so
-    // a bad photo doesn't use up a scan.
-    const { error: claimError } = await supabase.rpc("claim_menu_scan");
+    // Checks the user may scan this restaurant's menu (curators anytime,
+    // anyone while it has under 10 dishes) and counts the scan toward their
+    // daily limit (see claim_menu_scan()). After the image check, so a bad
+    // photo doesn't use up a scan.
+    const { error: claimError } = await supabase.rpc("claim_menu_scan", {
+      p_restaurant_id: typeof restaurantId === "string" ? restaurantId : null,
+    });
 
     if (claimError) {
       return json({ error: claimError.message }, 403);

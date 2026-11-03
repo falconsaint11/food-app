@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import { Palette } from '@/constants/theme';
+import { useIsCurator } from '@/lib/admin';
 import { supabase } from '@/lib/supabase';
 import { fetchTags, Tag } from '@/lib/tags';
 
@@ -70,16 +71,17 @@ function scanChanges(item: ReviewItem, existing: ExistingDish) {
   return changes;
 }
 
-// Curator tool: photograph a restaurant's menu, let Claude read the dishes
-// (the menu-scan edge function), review them, then add them to this location
-// with import_menu_dishes(). Dishes already on the menu get any new tags and
-// keep their details, unless the curator chooses to update them from the
-// scan.
+// Photograph a restaurant's menu, let Claude read the dishes (the menu-scan
+// edge function), review them, then add them to this location with
+// import_menu_dishes(). Curators can do this anytime; anyone can while the
+// menu has under 10 dishes. Dishes already on the menu get any new tags and
+// keep their details, unless a curator chooses to update them from the scan.
 export default function MenuImportScreen() {
   const { restaurantId, restaurantName } = useLocalSearchParams<{
     restaurantId: string;
     restaurantName: string;
   }>();
+  const isCurator = useIsCurator();
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(
@@ -185,7 +187,11 @@ export default function MenuImportScreen() {
       }
 
       const { data, error } = await supabase.functions.invoke('menu-scan', {
-        body: { image: asset.base64, mediaType: asset.mimeType ?? 'image/jpeg' },
+        body: {
+          image: asset.base64,
+          mediaType: asset.mimeType ?? 'image/jpeg',
+          restaurantId,
+        },
       });
 
       if (error) {
@@ -321,10 +327,13 @@ export default function MenuImportScreen() {
 
     const changes = scanChanges(item, match);
 
-    if (changes.length === 0) {
+    // Only curators can overwrite details on dishes already on the menu.
+    if (changes.length === 0 || !isCurator) {
       return (
         <Text style={styles.existingNote}>
-          Already on the menu. Nothing new from the scan.
+          {changes.length === 0
+            ? 'Already on the menu. Nothing new from the scan.'
+            : 'Already on the menu.'}
         </Text>
       );
     }
@@ -382,8 +391,10 @@ export default function MenuImportScreen() {
           <>
             <Text style={styles.subtitle}>
               Photograph each page of the menu, close enough that the text is
-              sharp. You&apos;ll review every dish before anything is saved,
-              and choose whether dishes already on the menu get updated.
+              sharp. You&apos;ll review every dish before anything is saved
+              {isCurator
+                ? ', and choose whether dishes already on the menu get updated.'
+                : '.'}
             </Text>
             {renderPhotoButtons()}
           </>

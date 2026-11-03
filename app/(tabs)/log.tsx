@@ -155,6 +155,26 @@ async function uploadPhoto(uri: string, userId: string) {
   return filePath;
 }
 
+// Menus with fewer dishes than this ask whoever is logging to add the menu
+// from a photo. Matches menu_dish_count() checks on the server.
+const SMALL_MENU_DISHES = 10;
+
+// Dishes on the menu across these locations (a chain counts once per name),
+// not counting discontinued ones.
+async function countMenuDishes(locationIds: string[]) {
+  if (locationIds.length === 0) return 0;
+
+  const { data, error } = await supabase
+    .from("dishes")
+    .select("name_key")
+    .in("restaurant_id", locationIds)
+    .is("discontinued_at", null);
+
+  if (error) throw new Error(error.message);
+
+  return new Set((data ?? []).map((dish) => dish.name_key)).size;
+}
+
 function plural(count: number, word: string) {
   return `${count} ${word}${count === 1 ? "" : "es"}`;
 }
@@ -212,6 +232,14 @@ export default function LogScreen() {
   // Every saved location of the selected restaurant's brand, so dish
   // suggestions cover the whole chain's menu.
   const [menuLocationIds, setMenuLocationIds] = useState<string[]>([]);
+  // How many dishes the chosen restaurant's menu has, tagged with the
+  // restaurant it was counted for so a stale count is never shown.
+  const [menuSize, setMenuSize] = useState<{
+    key: string;
+    count: number;
+  } | null>(null);
+  // Bumped when the tab comes back into focus, e.g. after adding a menu.
+  const [menuRefresh, setMenuRefresh] = useState(0);
 
   const [dishes, setDishes] = useState<DishEntry[]>(() => [createDishEntry()]);
 
@@ -876,8 +904,9 @@ export default function LogScreen() {
     return newRestaurant.id as string;
   }
 
-  // Admins can start a restaurant's menu from here, before anyone has logged
-  // a dish there. Saves the restaurant first so the import has somewhere to go.
+  // Adds the menu from a photo (anyone while it's small, curators anytime),
+  // even before anyone has logged a dish there. Saves the restaurant first
+  // so the import has somewhere to go.
   async function openMenuImport() {
     setLoading(true);
 
@@ -1241,6 +1270,16 @@ export default function LogScreen() {
 
   useEffect(() => {
     let cancelled = false;
+    const menuKey = `${selectedRestaurantId}|${googlePlaceId}`;
+
+    async function finish(ids: string[]) {
+      const count = await countMenuDishes(ids);
+
+      if (!cancelled) {
+        setMenuLocationIds(ids);
+        setMenuSize({ key: menuKey, count });
+      }
+    }
 
     async function loadMenuLocations() {
       try {
@@ -1258,7 +1297,7 @@ export default function LogScreen() {
             data?.brand_id ?? null,
           );
 
-          if (!cancelled) setMenuLocationIds(ids);
+          await finish(ids);
           return;
         }
 
@@ -1272,7 +1311,7 @@ export default function LogScreen() {
           if (error) throw new Error(error.message);
 
           if (!brandId) {
-            if (!cancelled) setMenuLocationIds([]);
+            await finish([]);
             return;
           }
 
@@ -1283,13 +1322,11 @@ export default function LogScreen() {
 
           if (locationsError) throw new Error(locationsError.message);
 
-          if (!cancelled) {
-            setMenuLocationIds((data ?? []).map((row) => row.id as string));
-          }
+          await finish((data ?? []).map((row) => row.id as string));
           return;
         }
 
-        if (!cancelled) setMenuLocationIds([]);
+        await finish([]);
       } catch (error) {
         console.log("Could not load brand menu:", error);
         if (!cancelled) setMenuLocationIds([]);
@@ -1303,7 +1340,7 @@ export default function LogScreen() {
     };
     // restaurantName and website are set together with googlePlaceId.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedRestaurantId, googlePlaceId]);
+  }, [selectedRestaurantId, googlePlaceId, menuRefresh]);
 
   useEffect(() => {
     const restaurantId = prefill.restaurantId;
@@ -1357,8 +1394,16 @@ export default function LogScreen() {
   useFocusEffect(
     useCallback(() => {
       loadMutualFollowers();
+      setMenuRefresh((value) => value + 1);
     }, []),
   );
+
+  const menuDishCount =
+    menuSize?.key === `${selectedRestaurantId}|${googlePlaceId}`
+      ? menuSize.count
+      : null;
+  const smallMenu =
+    menuDishCount !== null && menuDishCount < SMALL_MENU_DISHES;
 
   const showRestaurantSearch = !restaurantChosen;
 
@@ -1500,7 +1545,29 @@ export default function LogScreen() {
               </TouchableOpacity>
             </View>
 
-            {isCurator ? (
+            {smallMenu ? (
+              <View style={styles.menuPrompt}>
+                <Text style={styles.menuPromptTitle}>
+                  {menuDishCount === 0
+                    ? "🍽️ New spot on Wotri"
+                    : "🍽️ This menu is just getting started"}
+                </Text>
+                <Text style={styles.menuPromptText}>
+                  {menuDishCount === 0
+                    ? "Nobody has added the menu yet."
+                    : `Only ${plural(menuDishCount ?? 0, "dish")} so far.`}{" "}
+                  Snap a photo of the menu and we’ll add the dishes for
+                  everyone.
+                </Text>
+                <TouchableOpacity
+                  style={styles.menuPromptButton}
+                  onPress={openMenuImport}
+                  disabled={loading}
+                >
+                  <Text style={styles.menuPromptButtonText}>Upload menu</Text>
+                </TouchableOpacity>
+              </View>
+            ) : isCurator ? (
               <TouchableOpacity onPress={openMenuImport} disabled={loading}>
                 <Text style={styles.menuImportLink}>
                   Curator: add dishes from a menu photo
@@ -1855,6 +1922,38 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
 
+  menuPrompt: {
+    marginTop: 10,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: Palette.surface,
+    borderWidth: 1,
+    borderColor: Palette.accent,
+  },
+  menuPromptTitle: {
+    color: Palette.text,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  menuPromptText: {
+    color: Palette.textSecondary,
+    fontSize: 14,
+    lineHeight: 19,
+    marginTop: 4,
+  },
+  menuPromptButton: {
+    alignSelf: "flex-start",
+    marginTop: 10,
+    backgroundColor: Palette.accent,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  menuPromptButtonText: {
+    color: Palette.text,
+    fontSize: 14,
+    fontWeight: "700",
+  },
   menuImportLink: {
     fontSize: 14,
 
