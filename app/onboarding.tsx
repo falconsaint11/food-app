@@ -591,7 +591,9 @@ export default function OnboardingScreen() {
               onPress={() => setStep(5)}
               disabled={busy}
             >
-              <Text style={styles.buttonText}>Continue</Text>
+              <Text style={styles.buttonText}>
+                {followingIds.length > 0 ? "Continue" : "Skip for now"}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.linkButton}
