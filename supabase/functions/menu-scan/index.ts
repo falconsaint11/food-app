@@ -1,11 +1,12 @@
 // Reads one photo of a restaurant menu with Claude and returns the dishes on
-// it, with suggested tags. Curators and admins only. Nothing is saved here: the app shows
-// the dishes for review and saves them with import_menu_dishes().
+// it, with suggested tags. Curators and admins can scan anytime; anyone can
+// while the restaurant's menu has under 10 dishes. Nothing is saved here: the
+// app shows the dishes for review and saves them with import_menu_dishes().
 //
 // Deploy:  supabase functions deploy menu-scan
 // Secret:  supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
 //
-// Request:  { image: <base64 JPEG/PNG/WebP>, mediaType: "image/jpeg" }
+// Request:  { image: <base64 JPEG/PNG/WebP>, mediaType: "image/jpeg", restaurantId }
 // Response: { dishes: [{ name, price, section, description, options, variants, tags }] }
 
 import Anthropic from "npm:@anthropic-ai/sdk";
