@@ -105,6 +105,12 @@ type FriendReview = {
   } | null;
 };
 
+type PopularReview = FriendReview & {
+  created_at: string;
+  review_reactions: { count: number }[];
+  review_comments: { count: number }[];
+};
+
 type TagDish = {
   dish_id: string;
   name: string;
@@ -124,6 +130,10 @@ type LoadReason = 'focus' | 'refresh' | 'ask-location';
 
 // Reviews Discover is built from, newest first.
 const REVIEW_SAMPLE = 1000;
+
+// Popular posts come from this many days back, ranked by likes and comments.
+const POPULAR_DAYS = 7;
+const POPULAR_SAMPLE = 200;
 
 const ROW_COUNT = 10;
 
@@ -279,6 +289,7 @@ export default function DiscoverScreen() {
   const [nearby, setNearby] = useState<NearbySpot[]>([]);
   const [mapRestaurants, setMapRestaurants] = useState<MapRestaurant[]>([]);
   const [friendReviews, setFriendReviews] = useState<FriendReview[]>([]);
+  const [popularReviews, setPopularReviews] = useState<PopularReview[]>([]);
   const [trending, setTrending] = useState<Ranked[]>([]);
   const [topDishes, setTopDishes] = useState<Ranked[]>([]);
   const [hiddenGems, setHiddenGems] = useState<Ranked[]>([]);
@@ -391,6 +402,56 @@ export default function DiscoverScreen() {
     );
   }
 
+  // Everyone's posts from the past week, most liked and commented first
+  // (a comment counts double), photos ahead of the rest.
+  async function loadPopularReviews() {
+    const since = new Date(
+      Date.now() - POPULAR_DAYS * 24 * 60 * 60 * 1000
+    ).toISOString();
+
+    const { data, error } = await supabase
+      .from('reviews')
+      .select(`
+        id,
+        rating,
+        photo_path,
+        user_id,
+        created_at,
+        profiles:user_id (username, display_name),
+        dishes (name, restaurants (name, brands (name))),
+        review_reactions (count),
+        review_comments (count)
+      `)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(POPULAR_SAMPLE);
+
+    if (error) {
+      console.log('Popular reviews error:', error.message);
+      return;
+    }
+
+    const visible = await withoutHiddenUsers(
+      (data ?? []) as unknown as PopularReview[],
+      (review) => review.user_id
+    );
+
+    const score = (review: PopularReview) =>
+      (review.review_reactions[0]?.count ?? 0) +
+      2 * (review.review_comments[0]?.count ?? 0);
+
+    // Sorting is stable, so ties stay newest first.
+    setPopularReviews(
+      [...visible]
+        .sort(
+          (a, b) =>
+            Number(Boolean(b.photo_path)) - Number(Boolean(a.photo_path)) ||
+            score(b) - score(a)
+        )
+        .slice(0, ROW_COUNT)
+    );
+  }
+
   // The first load shows a spinner; later ones keep showing the old content
   // until the new one is ready.
   async function loadExplore(reason: LoadReason) {
@@ -409,6 +470,7 @@ export default function DiscoverScreen() {
     if (auth.user) {
       loadFriendReviews(auth.user.id);
     }
+    loadPopularReviews();
 
     const { data, error } = await supabase
       .from('reviews')
@@ -771,6 +833,38 @@ export default function DiscoverScreen() {
     }));
   }
 
+  function reviewCard(review: FriendReview): PhotoCard {
+    return {
+      key: review.id,
+      title: review.dishes?.name ?? 'A dish',
+      subtitle: `${review.profiles?.display_name || review.profiles?.username || 'Someone'} · ${
+        review.dishes?.restaurants?.brands?.name ??
+        review.dishes?.restaurants?.name ??
+        ''
+      }`,
+      rating: Number(review.rating),
+      photoPath: review.photo_path,
+      onPress: () =>
+        router.push({ pathname: '/review/[id]', params: { id: review.id } }),
+    };
+  }
+
+  function popularCard(review: PopularReview): PhotoCard {
+    const likes = review.review_reactions[0]?.count ?? 0;
+    const comments = review.review_comments[0]?.count ?? 0;
+
+    return {
+      ...reviewCard(review),
+      meta:
+        [
+          likes > 0 ? `♥ ${likes}` : null,
+          comments > 0 ? `💬 ${comments}` : null,
+        ]
+          .filter(Boolean)
+          .join('  ') || undefined,
+    };
+  }
+
   function renderSection(
     title: string,
     subtitle: string | null,
@@ -995,19 +1089,13 @@ export default function DiscoverScreen() {
             {renderSection(
               'What friends are eating',
               null,
-              friendReviews.map((review) => ({
-                key: review.id,
-                title: review.dishes?.name ?? 'A dish',
-                subtitle: `${review.profiles?.display_name || review.profiles?.username || 'Someone'} · ${
-                  review.dishes?.restaurants?.brands?.name ??
-                  review.dishes?.restaurants?.name ??
-                  ''
-                }`,
-                rating: Number(review.rating),
-                photoPath: review.photo_path,
-                onPress: () =>
-                  router.push({ pathname: '/review/[id]', params: { id: review.id } }),
-              }))
+              friendReviews.map(reviewCard)
+            )}
+
+            {renderSection(
+              'Popular this week',
+              'The posts people are loving',
+              popularReviews.map(popularCard)
             )}
 
             {renderSection(
