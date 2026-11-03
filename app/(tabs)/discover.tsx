@@ -182,6 +182,12 @@ function locationText(city: string | null, state: string | null) {
   return [city, state].filter(Boolean).join(', ');
 }
 
+// A "contains" pattern for an or() filter. Quoting keeps commas and
+// parentheses in the search from breaking the filter.
+function containsPattern(text: string) {
+  return `"%${text.replace(/["\\]/g, '\\$&')}%"`;
+}
+
 function reviewsText(count: number) {
   return `${count} ${count === 1 ? 'review' : 'reviews'}`;
 }
@@ -644,12 +650,13 @@ export default function DiscoverScreen() {
 
   async function runSearch(searchText: string, type: SearchType) {
     setSearchLoading(true);
+    const pattern = containsPattern(searchText);
 
     if (type === 'users') {
       const { data, error } = await supabase
         .from('profiles')
         .select('id, username, display_name, avatar_path')
-        .or(`username.ilike.%${searchText}%,display_name.ilike.%${searchText}%`)
+        .or(`username.ilike.${pattern},display_name.ilike.${pattern}`)
         .limit(20);
 
       setSearchLoading(false);
@@ -668,7 +675,7 @@ export default function DiscoverScreen() {
         .from('restaurants')
         .select('id, name, city, state')
         .or(
-          `name.ilike.%${searchText}%,city.ilike.%${searchText}%,state.ilike.%${searchText}%`
+          `name.ilike.${pattern},city.ilike.${pattern},state.ilike.${pattern}`
         )
         .limit(20);
 

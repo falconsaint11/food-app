@@ -4,7 +4,12 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import { DarkTheme, ThemeProvider } from "expo-router/react-navigation";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import "react-native-reanimated";
 
 const wotriTheme = {
@@ -26,6 +31,8 @@ export default function RootLayout() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Bumped by "Try again" to rerun the profile check.
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -64,8 +71,11 @@ export default function RootLayout() {
         .maybeSingle();
       if (cancelled) return;
       if (error) {
+        // "JWT issued at future" means the phone's clock is off.
         setErrorMessage(
-          `Profile check failed: ${error.message}. Confirm you ran the onboarding SQL.`,
+          /future/i.test(error.message)
+            ? "Your phone’s date and time look wrong. Turn on Set Automatically in Settings › General › Date & Time, then try again."
+            : "We couldn’t load your profile. Check your connection and try again.",
         );
         return;
       }
@@ -83,7 +93,7 @@ export default function RootLayout() {
     return () => {
       cancelled = true;
     };
-  }, [loading, session, segments, router]);
+  }, [loading, session, segments, router, attempt]);
 
   if (loading || errorMessage) {
     return (
@@ -97,9 +107,32 @@ export default function RootLayout() {
         }}
       >
         {errorMessage ? (
-          <Text style={{ color: "#FFFFFF", textAlign: "center" }}>
-            {errorMessage}
-          </Text>
+          <>
+            <Text
+              style={{ color: "#FFFFFF", fontSize: 16, textAlign: "center" }}
+            >
+              {errorMessage}
+            </Text>
+            {session ? (
+              <TouchableOpacity
+                style={{
+                  marginTop: 20,
+                  backgroundColor: "#FF5722",
+                  borderRadius: 12,
+                  paddingHorizontal: 24,
+                  paddingVertical: 12,
+                }}
+                onPress={() => {
+                  setErrorMessage(null);
+                  setAttempt((value) => value + 1);
+                }}
+              >
+                <Text style={{ color: "#FFFFFF", fontWeight: "700" }}>
+                  Try again
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </>
         ) : (
           <ActivityIndicator color="#FF5722" size="large" />
         )}
@@ -119,10 +152,6 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="auth" options={{ headerShown: false }} />
         <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-        <Stack.Screen
-          name="modal"
-          options={{ presentation: "modal", title: "Modal" }}
-        />
         <Stack.Screen
           name="compare"
           options={{ title: "Which Was Better?" }}
