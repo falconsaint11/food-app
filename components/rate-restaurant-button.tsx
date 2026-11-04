@@ -2,7 +2,9 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   StyleProp,
   StyleSheet,
@@ -150,52 +152,58 @@ export function RateRestaurantButton({
         animationType="slide"
         onRequestClose={() => setOpen(false)}
       >
-        <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
+        {/* Lifts the sheet above the keyboard so the notes stay visible. */}
+        <KeyboardAvoidingView
+          style={styles.keyboardView}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
 
-        <View style={styles.sheet}>
-          <Text style={styles.sheetTitle}>Rate {restaurantName}</Text>
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>Rate {restaurantName}</Text>
 
-          {!loading && pastRatings.length > 0 ? (
-            <Text style={styles.historyText}>
-              You’ve rated it{' '}
-              {pastRatings.length === 1
-                ? 'once'
-                : `${pastRatings.length} times`}{' '}
-              · last {formatRating(pastRatings[0], isPremium)} ★
-            </Text>
-          ) : null}
+            {!loading && pastRatings.length > 0 ? (
+              <Text style={styles.historyText}>
+                You’ve rated it{' '}
+                {pastRatings.length === 1
+                  ? 'once'
+                  : `${pastRatings.length} times`}{' '}
+                · last {formatRating(pastRatings[0], isPremium)} ★
+              </Text>
+            ) : null}
 
-          {loading ? (
-            <ActivityIndicator style={styles.loading} />
-          ) : (
-            <>
-              <StarRatingInput value={rating} onChange={setRating} />
+            {loading ? (
+              <ActivityIndicator style={styles.loading} />
+            ) : (
+              <>
+                <StarRatingInput value={rating} onChange={setRating} />
 
-              <TextInput
-                style={styles.notesInput}
-                placeholder="What stood out? (optional)"
-                placeholderTextColor={Palette.textMuted}
-                multiline
-                maxLength={2000}
-                value={notes}
-                onChangeText={setNotes}
-              />
+                <TextInput
+                  style={styles.notesInput}
+                  placeholder="What stood out? (optional)"
+                  placeholderTextColor={Palette.textMuted}
+                  multiline
+                  maxLength={2000}
+                  value={notes}
+                  onChangeText={setNotes}
+                />
 
-              <TouchableOpacity
-                style={[
-                  styles.saveButton,
-                  (rating < 0.5 || saving) && styles.saveButtonDisabled,
-                ]}
-                disabled={rating < 0.5 || saving}
-                onPress={saveRating}
-              >
-                <Text style={styles.saveButtonText}>
-                  {saving ? 'Saving...' : 'Save rating'}
-                </Text>
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
+                <TouchableOpacity
+                  style={[
+                    styles.saveButton,
+                    (rating < 0.5 || saving) && styles.saveButtonDisabled,
+                  ]}
+                  disabled={rating < 0.5 || saving}
+                  onPress={saveRating}
+                >
+                  <Text style={styles.saveButtonText}>
+                    {saving ? 'Saving...' : 'Save rating'}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </>
   );
@@ -215,6 +223,9 @@ const styles = StyleSheet.create({
     color: Palette.text,
     fontSize: 14,
     fontWeight: '600',
+  },
+  keyboardView: {
+    flex: 1,
   },
   backdrop: {
     flex: 1,

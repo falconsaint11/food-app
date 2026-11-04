@@ -4,12 +4,7 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import { DarkTheme, ThemeProvider } from "expo-router/react-navigation";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native";
 import "react-native-reanimated";
 
 const wotriTheme = {
@@ -24,6 +19,14 @@ const wotriTheme = {
     notification: "#FF5722",
   },
 };
+
+function checkProfile(userId: string) {
+  return supabase
+    .from("profiles")
+    .select("id, onboarding_completed")
+    .eq("id", userId)
+    .maybeSingle();
+}
 
 export default function RootLayout() {
   const router = useRouter();
@@ -64,14 +67,22 @@ export default function RootLayout() {
         if (location !== "auth") router.replace("/auth");
         return;
       }
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, onboarding_completed")
-        .eq("id", session.user.id)
-        .maybeSingle();
+      let { data, error } = await checkProfile(session.user.id);
+      // "JWT issued at future": a just-refreshed login can look a second
+      // early to the database when the servers' clocks differ slightly. It
+      // clears up on its own, so wait and retry before showing anything.
+      for (
+        let retry = 0;
+        retry < 5 && error && /future/i.test(error.message);
+        retry++
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        if (cancelled) return;
+        ({ data, error } = await checkProfile(session.user.id));
+      }
       if (cancelled) return;
       if (error) {
-        // "JWT issued at future" means the phone's clock is off.
+        // Still failing after the retries: the phone's clock really is off.
         setErrorMessage(
           /future/i.test(error.message)
             ? "Your phone’s date and time look wrong. Turn on Set Automatically in Settings › General › Date & Time, then try again."
@@ -144,6 +155,8 @@ export default function RootLayout() {
     <ThemeProvider value={wotriTheme}>
       <Stack
         screenOptions={{
+          // Just the back arrow, never the previous screen's route name.
+          headerBackButtonDisplayMode: "minimal",
           headerStyle: { backgroundColor: "#1D1D1D" },
           headerTintColor: "#FFFFFF",
           contentStyle: { backgroundColor: "#121212" },
@@ -152,16 +165,34 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="auth" options={{ headerShown: false }} />
         <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-        <Stack.Screen
-          name="compare"
-          options={{ title: "Which Was Better?" }}
-        />
+        <Stack.Screen name="compare" options={{ title: "Which Was Better?" }} />
         <Stack.Screen name="rank-dishes" options={{ title: "Top Dishes" }} />
         <Stack.Screen
           name="rank-restaurants"
           options={{ title: "Top Restaurants" }}
         />
         <Stack.Screen name="dish-edit" options={{ title: "Edit Dish" }} />
+        <Stack.Screen name="restaurant/[id]" options={{ title: "" }} />
+        <Stack.Screen
+          name="restaurant-photo/[id]"
+          options={{ title: "Photo" }}
+        />
+        <Stack.Screen name="dish/[id]" options={{ title: "" }} />
+        <Stack.Screen name="review/[id]" options={{ title: "Review" }} />
+        <Stack.Screen
+          name="review/edit/[id]"
+          options={{ title: "Edit Review" }}
+        />
+        <Stack.Screen name="user/[id]" options={{ title: "" }} />
+        <Stack.Screen name="profile" options={{ title: "Profile" }} />
+        <Stack.Screen name="edit-profile" options={{ title: "Edit Profile" }} />
+        <Stack.Screen
+          name="create-profile"
+          options={{ title: "Create Profile" }}
+        />
+        <Stack.Screen name="diary" options={{ title: "Diary" }} />
+        <Stack.Screen name="followers" options={{ title: "Followers" }} />
+        <Stack.Screen name="following" options={{ title: "Following" }} />
       </Stack>
       <StatusBar style="light" />
     </ThemeProvider>
