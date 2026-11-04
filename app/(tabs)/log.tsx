@@ -27,6 +27,7 @@ import {
 import { StarRatingInput } from "@/components/star-rating-input";
 import { useIsCurator } from "@/lib/admin";
 import { getBrandLocationIds } from "@/lib/brands";
+import { uploadPhoto } from "@/lib/photos";
 import { supabase } from "@/lib/supabase";
 import { fetchTags, Tag } from "@/lib/tags";
 import { Palette } from "@/constants/theme";
@@ -117,44 +118,6 @@ function createSessionToken() {
   );
 }
 
-async function uploadPhoto(uri: string, userId: string) {
-  const uriParts = uri.split(".");
-
-  const rawExtension = uriParts[uriParts.length - 1]?.toLowerCase();
-
-  const extension =
-    rawExtension === "png" ? "png" : rawExtension === "webp" ? "webp" : "jpg";
-
-  const contentType =
-    extension === "png"
-      ? "image/png"
-      : extension === "webp"
-        ? "image/webp"
-        : "image/jpeg";
-
-  const filePath = `${userId}/${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2)}.${extension}`;
-
-  const response = await fetch(uri);
-
-  const arrayBuffer = await response.arrayBuffer();
-
-  const { error } = await supabase.storage
-    .from("review-photos")
-    .upload(filePath, arrayBuffer, {
-      contentType,
-
-      upsert: false,
-    });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return filePath;
-}
-
 // Menus with fewer dishes than this ask whoever is logging to add the menu
 // from a photo. Matches menu_dish_count() checks on the server.
 const SMALL_MENU_DISHES = 10;
@@ -210,6 +173,8 @@ export default function LogScreen() {
   const [manualRestaurant, setManualRestaurant] = useState(false);
 
   const [atManualRestaurant, setAtManualRestaurant] = useState(false);
+  // For a restaurant being added now. Food trucks never keep a location.
+  const [isFoodTruck, setIsFoodTruck] = useState(false);
 
   const [gettingLocation, setGettingLocation] = useState(false);
 
@@ -427,6 +392,8 @@ export default function LogScreen() {
     setManualRestaurant(false);
 
     setAtManualRestaurant(false);
+
+    setIsFoodTruck(false);
 
     setWebsite(null);
 
@@ -893,6 +860,8 @@ export default function LogScreen() {
         google_place_id: googlePlaceId,
 
         website,
+
+        is_food_truck: isFoodTruck,
       })
       .select("id")
       .single();
@@ -1575,7 +1544,23 @@ export default function LogScreen() {
               </TouchableOpacity>
             ) : null}
 
-            {manualRestaurant ? (
+            {!selectedRestaurantId ? (
+              <View style={styles.hereRow}>
+                <Text style={styles.hereText}>🚚 It’s a food truck</Text>
+
+                <Switch
+                  value={isFoodTruck}
+                  onValueChange={(value) => {
+                    setIsFoodTruck(value);
+                    // A food truck doesn't keep a location.
+                    if (value) setAtManualRestaurant(false);
+                  }}
+                  trackColor={{ true: Palette.accent }}
+                />
+              </View>
+            ) : null}
+
+            {manualRestaurant && !isFoodTruck ? (
               <View style={styles.hereRow}>
                 <Text style={styles.hereText}>
                   I’m here right now (saves its location)

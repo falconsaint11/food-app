@@ -4,6 +4,7 @@ export type ReportTargetType =
   | 'review'
   | 'comment'
   | 'restaurant_note'
+  | 'restaurant_photo'
   | 'user';
 
 export type ReportReason =

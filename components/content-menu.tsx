@@ -39,6 +39,7 @@ const TARGET_LABELS: Record<ReportTargetType, string> = {
   review: 'review',
   comment: 'comment',
   restaurant_note: 'note',
+  restaurant_photo: 'photo',
   user: 'profile',
 };
 

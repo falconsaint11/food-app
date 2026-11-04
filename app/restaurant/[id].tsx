@@ -1,4 +1,5 @@
 import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
@@ -26,6 +27,7 @@ import {
   getBrandLocationsNearestFirst,
 } from '@/lib/brands';
 import { useIsCurator } from '@/lib/admin';
+import { uploadPhoto } from '@/lib/photos';
 import { withoutHiddenUsers } from '@/lib/moderation';
 import { formatRating, useIsPremium } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
@@ -41,6 +43,14 @@ type Restaurant = {
   } | null;
   // Pinned cover for restaurants without a brand.
   cover_review_id: string | null;
+  is_food_truck: boolean;
+};
+
+// A photo of the place itself, added without a review.
+type PlacePhoto = {
+  id: string;
+  user_id: string;
+  photo_path: string;
 };
 
 type DishSummary = {
@@ -202,6 +212,8 @@ export default function RestaurantDetailScreen() {
   const [dishes, setDishes] = useState<DishSummary[]>([]);
   const [reviews, setReviews] = useState<RestaurantReview[]>([]);
   const [coverPhotos, setCoverPhotos] = useState<CoverPhoto[]>([]);
+  const [placePhotos, setPlacePhotos] = useState<PlacePhoto[]>([]);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [restaurantRating, setRestaurantRating] = useState(0);
   const [ratingCount, setRatingCount] = useState(0);
   const [myVisits, setMyVisits] = useState<MyVisit[]>([]);
@@ -221,6 +233,118 @@ export default function RestaurantDetailScreen() {
     }, [id])
   );
 
+  // Photos of the place from every location of the brand, newest first.
+  async function loadPlacePhotos(locationIds: string[]) {
+    const { data, error } = await supabase
+      .from('restaurant_photos')
+      .select('id, user_id, photo_path')
+      .in('restaurant_id', locationIds)
+      .order('created_at', { ascending: false })
+      .limit(PHOTO_COUNT);
+
+    if (error) {
+      console.log('Restaurant photos error:', error.message);
+      return;
+    }
+
+    setPlacePhotos(
+      await withoutHiddenUsers((data ?? []) as PlacePhoto[], (photo) => photo.user_id)
+    );
+  }
+
+  function addPlacePhoto() {
+    Alert.alert('Add a photo', 'Show people what the place looks like.', [
+      { text: 'Take photo', onPress: () => pickPlacePhoto('camera') },
+      { text: 'Choose from library', onPress: () => pickPlacePhoto('library') },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }
+
+  async function pickPlacePhoto(source: 'camera' | 'library') {
+    if (!restaurant) return;
+
+    const permission =
+      source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permission.granted) {
+      Alert.alert(
+        'Permission needed',
+        source === 'camera'
+          ? 'Allow camera access in Settings to take a photo.'
+          : 'Allow photo access in Settings to choose a photo.'
+      );
+      return;
+    }
+
+    const options: ImagePicker.ImagePickerOptions = {
+      mediaTypes: ['images'],
+      quality: 0.7,
+    };
+    const result =
+      source === 'camera'
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync(options);
+
+    if (result.canceled || !result.assets[0]) return;
+
+    setUploadingPhoto(true);
+
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) throw new Error('Log in to add photos.');
+
+      const photoPath = await uploadPhoto(result.assets[0].uri, user.id);
+
+      const { error } = await supabase.from('restaurant_photos').insert({
+        restaurant_id: restaurant.id,
+        photo_path: photoPath,
+      });
+
+      if (error) {
+        // Don't leave the file behind if the row wasn't saved.
+        await supabase.storage.from('review-photos').remove([photoPath]);
+        throw new Error(
+          error.message.includes('row-level security')
+            ? 'You’ve added a lot of photos today. Try again tomorrow.'
+            : error.message
+        );
+      }
+
+      loadPlacePhotos(
+        await getBrandLocationIds(restaurant.id, restaurant.brand_id)
+      );
+    } catch (error) {
+      Alert.alert(
+        'Photo not added',
+        error instanceof Error ? error.message : 'Something went wrong.'
+      );
+    } finally {
+      setUploadingPhoto(false);
+    }
+  }
+
+  async function toggleFoodTruck() {
+    if (!restaurant) return;
+
+    const on = !restaurant.is_food_truck;
+    const { error } = await supabase.rpc('set_food_truck', {
+      p_restaurant_id: restaurant.id,
+      p_on: on,
+    });
+
+    if (error) {
+      Alert.alert('Error', error.message);
+      return;
+    }
+
+    setRestaurant({ ...restaurant, is_food_truck: on });
+  }
+
   async function loadRestaurant() {
     if (!id) {
       return;
@@ -231,7 +355,9 @@ export default function RestaurantDetailScreen() {
     try {
       const { data: restaurantData, error: restaurantError } = await supabase
         .from('restaurants')
-        .select('id, name, brand_id, cover_review_id, brands (name, cover_review_id)')
+        .select(
+          'id, name, brand_id, cover_review_id, is_food_truck, brands (name, cover_review_id)'
+        )
         .eq('id', id)
         .maybeSingle();
 
@@ -250,6 +376,8 @@ export default function RestaurantDetailScreen() {
         restaurantRow.id,
         restaurantRow.brand_id
       );
+
+      loadPlacePhotos(locationIds);
 
       // Visits to any of the brand's locations (from the Log tab) plus
       // brand-wide ratings (from the Rate button). Each row is one visit;
@@ -806,6 +934,20 @@ export default function RestaurantDetailScreen() {
           <View style={styles.headerInfo}>
             <Text style={styles.title}>{restaurantName}</Text>
 
+            {restaurant.is_food_truck ? (
+              <Text style={styles.foodTruckBadge}>🚚 Food truck</Text>
+            ) : null}
+
+            {isCurator ? (
+              <TouchableOpacity onPress={toggleFoodTruck}>
+                <Text style={styles.curatorLink}>
+                  {restaurant.is_food_truck
+                    ? 'Curator: not a food truck'
+                    : 'Curator: mark as food truck'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+
             {myVisits.length > 0 ? (
               <Text style={styles.visitCount}>
                 You’ve been here{' '}
@@ -1014,37 +1156,71 @@ export default function RestaurantDetailScreen() {
             </View>
           ) : null}
 
-          {photos.length > 0 ? (
-            <View style={styles.carouselSection}>
-              <Text style={[styles.sectionTitle, styles.inset]}>Photos</Text>
+          <View style={styles.carouselSection}>
+            <Text style={[styles.sectionTitle, styles.inset]}>Photos</Text>
 
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.photoRow}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.photoRow}
+            >
+              <TouchableOpacity
+                style={[styles.photo, styles.addPhotoTile]}
+                activeOpacity={0.8}
+                onPress={addPlacePhoto}
+                disabled={uploadingPhoto}
               >
-                {photos.map((review) => (
-                  <TouchableOpacity
-                    key={review.id}
-                    activeOpacity={0.8}
-                    onPress={() =>
-                      router.push({
-                        pathname: '/review/[id]',
-                        params: { id: review.id },
-                      })
-                    }
-                  >
-                    <Image
-                      source={{ uri: getPhotoUrl(review.photo_path!) }}
-                      style={styles.photo}
-                      contentFit="cover"
-                      transition={150}
-                    />
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          ) : null}
+                {uploadingPhoto ? (
+                  <ActivityIndicator color={Palette.accent} />
+                ) : (
+                  <>
+                    <Text style={styles.addPhotoPlus}>+</Text>
+                    <Text style={styles.addPhotoText}>Add photo</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              {placePhotos.map((photo) => (
+                <TouchableOpacity
+                  key={photo.id}
+                  activeOpacity={0.8}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/restaurant-photo/[id]',
+                      params: { id: photo.id },
+                    })
+                  }
+                >
+                  <Image
+                    source={{ uri: getPhotoUrl(photo.photo_path) }}
+                    style={styles.photo}
+                    contentFit="cover"
+                    transition={150}
+                  />
+                </TouchableOpacity>
+              ))}
+
+              {photos.map((review) => (
+                <TouchableOpacity
+                  key={review.id}
+                  activeOpacity={0.8}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/review/[id]',
+                      params: { id: review.id },
+                    })
+                  }
+                >
+                  <Image
+                    source={{ uri: getPhotoUrl(review.photo_path!) }}
+                    style={styles.photo}
+                    contentFit="cover"
+                    transition={150}
+                  />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
 
           <View style={styles.container}>
             <View style={styles.section}>
@@ -1326,6 +1502,24 @@ const styles = StyleSheet.create({
     fontSize: 30,
     fontWeight: '700',
   },
+  foodTruckBadge: {
+    alignSelf: 'flex-start',
+    color: Palette.text,
+    fontSize: 13,
+    fontWeight: '700',
+    backgroundColor: Palette.surface,
+    borderRadius: 8,
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginTop: 8,
+  },
+  curatorLink: {
+    color: Palette.accent,
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 8,
+  },
   visitCount: {
     color: Palette.textSecondary,
     fontSize: 14,
@@ -1511,6 +1705,24 @@ const styles = StyleSheet.create({
     height: 110,
     borderRadius: 12,
     backgroundColor: Palette.surface,
+  },
+  addPhotoTile: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: Palette.borderStrong,
+  },
+  addPhotoPlus: {
+    color: Palette.accent,
+    fontSize: 30,
+    fontWeight: '600',
+    lineHeight: 32,
+  },
+  addPhotoText: {
+    color: Palette.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
   },
   section: {
     marginTop: 6,
