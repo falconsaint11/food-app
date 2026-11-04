@@ -40,9 +40,11 @@ type Restaurant = {
   brands: {
     name: string;
     cover_review_id: string | null;
+    cover_photo_id: string | null;
   } | null;
   // Pinned cover for restaurants without a brand.
   cover_review_id: string | null;
+  cover_photo_id: string | null;
   is_food_truck: boolean;
 };
 
@@ -356,7 +358,7 @@ export default function RestaurantDetailScreen() {
       const { data: restaurantData, error: restaurantError } = await supabase
         .from('restaurants')
         .select(
-          'id, name, brand_id, cover_review_id, is_food_truck, brands (name, cover_review_id)'
+          'id, name, brand_id, cover_review_id, cover_photo_id, is_food_truck, brands (name, cover_review_id, cover_photo_id)'
         )
         .eq('id', id)
         .maybeSingle();
@@ -515,7 +517,30 @@ export default function RestaurantDetailScreen() {
         ),
       ]);
 
-      setCoverPhotos(covers);
+      // A pinned restaurant photo leads the cover.
+      const pinnedPhotoId = restaurantRow.brand_id
+        ? (restaurantRow.brands?.cover_photo_id ?? null)
+        : restaurantRow.cover_photo_id;
+      const { data: pinnedPhoto } = pinnedPhotoId
+        ? await supabase
+            .from('restaurant_photos')
+            .select('id, photo_path')
+            .eq('id', pinnedPhotoId)
+            .maybeSingle()
+        : { data: null };
+
+      setCoverPhotos(
+        pinnedPhoto
+          ? [
+              {
+                review_id: '',
+                place_photo_id: pinnedPhoto.id,
+                photo_path: pinnedPhoto.photo_path,
+              },
+              ...covers,
+            ]
+          : covers
+      );
 
       const { data: reviewData, error: reviewError } =
         dishIds.length > 0

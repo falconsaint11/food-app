@@ -13,7 +13,7 @@ import {
 import { ContentMenu } from '@/components/content-menu';
 import { reviewPhotoUrl } from '@/components/photo-card-row';
 import { Palette } from '@/constants/theme';
-import { useIsAdmin } from '@/lib/admin';
+import { useIsAdmin, useIsCurator } from '@/lib/admin';
 import { supabase } from '@/lib/supabase';
 
 type Photo = {
@@ -22,21 +22,30 @@ type Photo = {
   photo_path: string;
   created_at: string;
   restaurant_id: string;
-  restaurants: { name: string; brands: { name: string } | null } | null;
+  restaurants: {
+    name: string;
+    brand_id: string | null;
+    cover_photo_id: string | null;
+    brands: { name: string; cover_photo_id: string | null } | null;
+  } | null;
 };
 
 type Author = { username: string; display_name: string | null };
 
 // One photo of a restaurant added without a review: who added it, and
 // Report/Block, or Delete for the person who added it (and admins).
+// Curators and admins can pin it as the restaurant's cover.
 export default function RestaurantPhotoScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const isAdmin = useIsAdmin();
+  const isCurator = useIsCurator();
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [author, setAuthor] = useState<Author | null>(null);
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const [pinning, setPinning] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -46,7 +55,7 @@ export default function RestaurantPhotoScreen() {
         supabase
           .from('restaurant_photos')
           .select(
-            'id, user_id, photo_path, created_at, restaurant_id, restaurants (name, brands (name))'
+            'id, user_id, photo_path, created_at, restaurant_id, restaurants (name, brand_id, cover_photo_id, brands (name, cover_photo_id))'
           )
           .eq('id', id)
           .maybeSingle(),
@@ -60,6 +69,14 @@ export default function RestaurantPhotoScreen() {
       const row = (data as unknown as Photo | null) ?? null;
       setPhoto(row);
       setMyUserId(auth.user?.id ?? null);
+      // The cover is the brand's, or the location's when it has no brand.
+      const place = row?.restaurants;
+      setPinned(
+        Boolean(row) &&
+          (place?.brand_id
+            ? place.brands?.cover_photo_id
+            : place?.cover_photo_id) === row?.id
+      );
 
       if (row) {
         const { data: profile } = await supabase
@@ -86,6 +103,26 @@ export default function RestaurantPhotoScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: deletePhoto },
     ]);
+  }
+
+  async function togglePin() {
+    if (!photo) return;
+
+    setPinning(true);
+
+    const { error } = await supabase.rpc('pin_restaurant_photo', {
+      p_photo_id: photo.id,
+      p_pin: !pinned,
+    });
+
+    setPinning(false);
+
+    if (error) {
+      Alert.alert('Error', error.message);
+      return;
+    }
+
+    setPinned(!pinned);
   }
 
   async function deletePhoto() {
@@ -144,6 +181,22 @@ export default function RestaurantPhotoScreen() {
         transition={150}
       />
 
+      {isCurator ? (
+        <TouchableOpacity
+          style={[styles.pinButton, pinned && styles.pinButtonOn]}
+          onPress={togglePin}
+          disabled={pinning}
+        >
+          <Text style={styles.pinText}>
+            {pinning
+              ? 'Saving…'
+              : pinned
+                ? '📌 Restaurant cover · Unpin'
+                : '📌 Pin as restaurant cover'}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+
       <View style={styles.footer}>
         <View style={styles.footerInfo}>
           <TouchableOpacity
@@ -194,6 +247,23 @@ const styles = StyleSheet.create({
   },
   image: {
     flex: 1,
+  },
+  pinButton: {
+    alignSelf: 'center',
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: Palette.accent,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  pinButtonOn: {
+    backgroundColor: Palette.accent,
+  },
+  pinText: {
+    color: Palette.text,
+    fontSize: 14,
+    fontWeight: '700',
   },
   footer: {
     flexDirection: 'row',

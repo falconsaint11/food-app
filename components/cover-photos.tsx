@@ -18,6 +18,8 @@ import { supabase } from '@/lib/supabase';
 export type CoverPhoto = {
   review_id: string;
   photo_path: string;
+  // Set for a restaurant photo added without a review; opens that photo.
+  place_photo_id?: string;
 };
 
 const COVER_HEIGHT = 220;
@@ -80,13 +82,18 @@ export function CoverPhotos({ photos, title }: CoverPhotosProps) {
       >
         {photos.map((photo) => (
           <TouchableOpacity
-            key={photo.review_id}
+            key={photo.place_photo_id ?? photo.review_id}
             activeOpacity={0.9}
             onPress={() =>
-              router.push({
-                pathname: '/review/[id]',
-                params: { id: photo.review_id },
-              })
+              photo.place_photo_id
+                ? router.push({
+                    pathname: '/restaurant-photo/[id]',
+                    params: { id: photo.place_photo_id },
+                  })
+                : router.push({
+                    pathname: '/review/[id]',
+                    params: { id: photo.review_id },
+                  })
             }
           >
             <Image
@@ -105,7 +112,7 @@ export function CoverPhotos({ photos, title }: CoverPhotosProps) {
         <View style={styles.dots} pointerEvents="none">
           {photos.map((photo, index) => (
             <View
-              key={photo.review_id}
+              key={photo.place_photo_id ?? photo.review_id}
               style={[styles.dot, index === activeIndex && styles.activeDot]}
             />
           ))}
