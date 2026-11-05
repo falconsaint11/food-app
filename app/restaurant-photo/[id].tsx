@@ -20,6 +20,7 @@ type Photo = {
   id: string;
   user_id: string;
   photo_path: string;
+  kind: 'place' | 'menu';
   created_at: string;
   restaurant_id: string;
   restaurants: {
@@ -55,7 +56,7 @@ export default function RestaurantPhotoScreen() {
         supabase
           .from('restaurant_photos')
           .select(
-            'id, user_id, photo_path, created_at, restaurant_id, restaurants (name, brand_id, cover_photo_id, brands (name, cover_photo_id))'
+            'id, user_id, photo_path, kind, created_at, restaurant_id, restaurants (name, brand_id, cover_photo_id, brands (name, cover_photo_id))'
           )
           .eq('id', id)
           .maybeSingle(),
@@ -172,7 +173,11 @@ export default function RestaurantPhotoScreen() {
 
   return (
     <View style={styles.screen}>
-      <Stack.Screen options={{ title: restaurantName }} />
+      <Stack.Screen
+        options={{
+          title: photo.kind === 'menu' ? `${restaurantName} menu` : restaurantName,
+        }}
+      />
 
       <Image
         source={{ uri: reviewPhotoUrl(photo.photo_path) }}

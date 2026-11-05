@@ -130,5 +130,5 @@ export async function fetchRestaurantRatings(restaurantIds: string[]) {
 }
 
 export function formatRating(rating: RatingSummary | undefined) {
-  return rating && rating.count > 0 ? `${rating.average.toFixed(1)} ★` : '—';
+  return rating && rating.count > 0 ? `${rating.average.toFixed(2)} ★` : '—';
 }

@@ -9,6 +9,8 @@ export type PhotoCard = {
   title: string;
   subtitle?: string;
   rating?: number | null;
+  // Averages show two decimals; one person's rating shows one.
+  ratingDigits?: 1 | 2;
   // Shown after the rating ("12 reviews", "0.8 mi").
   meta?: string;
   photoPath?: string | null;
@@ -90,7 +92,7 @@ export function PhotoCardRow({
           {card.rating || card.meta ? (
             <Text style={styles.meta} numberOfLines={1}>
               {card.rating ? (
-                <Text style={styles.rating}>{card.rating.toFixed(1)} ★</Text>
+                <Text style={styles.rating}>{card.rating.toFixed(card.ratingDigits ?? 2)} ★</Text>
               ) : null}
               {card.rating && card.meta ? '  ·  ' : ''}
               {card.meta ?? ''}

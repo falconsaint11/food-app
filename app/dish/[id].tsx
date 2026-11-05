@@ -22,7 +22,7 @@ import {
 } from '@/lib/brands';
 import { useIsCurator } from '@/lib/admin';
 import { withoutHiddenUsers } from '@/lib/moderation';
-import { formatRating, useIsPremium } from '@/lib/ratings';
+import { formatAverage, formatRating, useIsPremium } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
 import { fetchDishPublicTags, Tag } from '@/lib/tags';
 import { Palette } from '@/constants/theme';
@@ -442,7 +442,7 @@ export default function DishDetailScreen() {
           <View style={styles.stat}>
             <Text style={styles.statNumber}>
               {averageRating > 0
-                ? averageRating.toFixed(1)
+                ? formatAverage(averageRating)
                 : '—'}{' '}
               ★
             </Text>

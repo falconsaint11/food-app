@@ -167,6 +167,7 @@ export default function RootLayout() {
         <Stack.Screen name="onboarding" options={{ headerShown: false }} />
         <Stack.Screen name="compare" options={{ title: "Which Was Better?" }} />
         <Stack.Screen name="rank-dishes" options={{ title: "Top Dishes" }} />
+        <Stack.Screen name="rank-drinks" options={{ title: "Top Drinks" }} />
         <Stack.Screen
           name="rank-restaurants"
           options={{ title: "Top Restaurants" }}

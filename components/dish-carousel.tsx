@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { Palette } from '@/constants/theme';
+import { formatAverage } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
 
 export type CarouselDish = {
@@ -12,12 +13,21 @@ export type CarouselDish = {
   reviewCount: number;
   photoPath: string | null;
   tried: boolean;
+  // The viewer's own latest rating, shown instead of the average with
+  // showMine.
+  myRating?: number | null;
 };
 
 const CARD_WIDTH = 150;
 
 // A sideways row of ranked dish cards with their best review photo.
-export function DishCarousel({ dishes }: { dishes: CarouselDish[] }) {
+export function DishCarousel({
+  dishes,
+  showMine = false,
+}: {
+  dishes: CarouselDish[];
+  showMine?: boolean;
+}) {
   return (
     <ScrollView
       horizontal
@@ -57,7 +67,7 @@ export function DishCarousel({ dishes }: { dishes: CarouselDish[] }) {
               <Text style={styles.rankText}>#{index + 1}</Text>
             </View>
 
-            {dish.tried ? (
+            {dish.tried && !showMine ? (
               <View style={styles.triedBadge}>
                 <Text style={styles.triedText}>✓</Text>
               </View>
@@ -68,10 +78,19 @@ export function DishCarousel({ dishes }: { dishes: CarouselDish[] }) {
             {dish.name}
           </Text>
 
-          <Text style={styles.meta} numberOfLines={1}>
-            <Text style={styles.rating}>{dish.averageRating.toFixed(1)} ★</Text>
-            {`  ·  ${dish.reviewCount} ${dish.reviewCount === 1 ? 'review' : 'reviews'}`}
-          </Text>
+          {showMine ? (
+            <Text style={styles.meta} numberOfLines={1}>
+              <Text style={styles.rating}>
+                {(dish.myRating ?? 0).toFixed(1)} ★
+              </Text>
+              {'  ·  Your rating'}
+            </Text>
+          ) : (
+            <Text style={styles.meta} numberOfLines={1}>
+              <Text style={styles.rating}>{formatAverage(dish.averageRating)} ★</Text>
+              {`  ·  ${dish.reviewCount} ${dish.reviewCount === 1 ? 'review' : 'reviews'}`}
+            </Text>
+          )}
         </TouchableOpacity>
       ))}
     </ScrollView>

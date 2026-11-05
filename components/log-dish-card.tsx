@@ -204,24 +204,44 @@ export function LogDishCard({
     });
   }
 
-  async function pickPhoto() {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  // Camera or library, whichever they want.
+  function pickPhoto() {
+    Alert.alert("Add a photo", undefined, [
+      { text: "Take photo", onPress: () => choosePhoto("camera") },
+      { text: "Choose from library", onPress: () => choosePhoto("library") },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }
+
+  async function choosePhoto(source: "camera" | "library") {
+    const permission =
+      source === "camera"
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
       Alert.alert(
-        "Photo permission needed",
-        "Allow photo access to add a photo to your review.",
+        source === "camera"
+          ? "Camera permission needed"
+          : "Photo permission needed",
+        source === "camera"
+          ? "Allow camera access to take a photo for your review."
+          : "Allow photo access to add a photo to your review.",
       );
 
       return;
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
+    const options: ImagePicker.ImagePickerOptions = {
       mediaTypes: ["images"],
       allowsEditing: true,
       aspect: [4, 3],
       quality: 0.8,
-    });
+    };
+    const result =
+      source === "camera"
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync(options);
 
     if (!result.canceled) {
       onChange({ photoUri: result.assets[0].uri });

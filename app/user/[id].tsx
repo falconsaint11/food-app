@@ -155,6 +155,7 @@ export default function UserProfileScreen() {
   const [profile, setProfile] = useState<PublicProfile | null>(null);
 
   const [topDishes, setTopDishes] = useState<RankedDish[]>([]);
+  const [topDrinks, setTopDrinks] = useState<RankedDish[]>([]);
 
   const [topRestaurants, setTopRestaurants] = useState<RankedRestaurant[]>([]);
 
@@ -357,6 +358,14 @@ export default function UserProfileScreen() {
     }
 
     setTopDishes((dishData ?? []) as unknown as RankedDish[]);
+    // Top drinks are newer; a failure here leaves the section empty.
+    const { data: rankedDrinkData, error: rankedDrinkError } = await supabase
+      .from("drink_rankings")
+      .select("id, rank, dishes (id, name, discontinued_at, restaurants (id, name))")
+      .eq("user_id", id)
+      .order("rank", { ascending: true });
+    if (rankedDrinkError) console.log("Top drinks error:", rankedDrinkError.message);
+    setTopDrinks((rankedDrinkData ?? []) as unknown as RankedDish[]);
 
     const {
       data: restaurantData,
@@ -865,6 +874,33 @@ export default function UserProfileScreen() {
           </View>
         )}
       </View>
+
+      {topDrinks.length > 0 ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Top Drinks</Text>
+          {topDrinks.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyText}>Nothing ranked yet.</Text>
+            </View>
+          ) : (
+            <View style={styles.featureGrid}>
+              {topDrinks.slice(0, 4).map((item) => (
+                <TopPickCard
+                  key={item.id}
+                  rank={item.rank}
+                  title={item.dishes ? dishLabel(item.dishes) : "Unknown drink"}
+                  subtitle={item.dishes?.restaurants?.name ?? "Unknown restaurant"}
+                  photoUrl={getTopPhotoUrl(topPhotos.byDish, item.dishes?.id)}
+                  onPress={() => {
+                    if (!item.dishes?.id) return;
+                    router.push({ pathname: "/dish/[id]", params: { id: item.dishes.id } });
+                  }}
+                />
+              ))}
+            </View>
+          )}
+        </View>
+      ) : null}
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Top Restaurants</Text>

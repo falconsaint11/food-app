@@ -73,6 +73,7 @@ async function fetchMyRatedLocations(userId: string) {
           latitude: Number(location.latitude),
           longitude: Number(location.longitude),
           rating,
+          ratingDigits: 1,
           subtitle: [location.city, location.state].filter(Boolean).join(', '),
           meta: 'Your rating',
           photoPath: null,

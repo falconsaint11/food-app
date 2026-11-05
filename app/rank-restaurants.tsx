@@ -1,4 +1,5 @@
 import { PickOption, TopPicksEditor } from '@/components/top-picks-editor';
+import { fetchLatestRestaurantScores } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
 
 type LocationRow = {
@@ -130,6 +131,14 @@ async function loadRestaurantOptions(userId: string) {
     }
   }
 
+  // Latest score per brand (or unbranded location), the same keys as here.
+  const ratingByKey = new Map(
+    (await fetchLatestRestaurantScores(userId)).map((score) => [
+      score.id,
+      score.rating,
+    ])
+  );
+
   const options: PickOption[] = [...locations.entries()].map(
     ([key, location]) => ({
       key,
@@ -138,6 +147,7 @@ async function loadRestaurantOptions(userId: string) {
         (location.brand_id && brandNames.get(location.brand_id)) ||
         location.name,
       subtitle: location.city,
+      rating: ratingByKey.get(key) ?? null,
     })
   );
 

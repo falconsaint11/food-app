@@ -12,8 +12,9 @@ export type MapRestaurant = {
   name: string;
   latitude: number;
   longitude: number;
-  // Shown on the pin.
+  // Shown on the pin. Averages show two decimals; one person's rating, one.
   rating: number;
+  ratingDigits?: 1 | 2;
   subtitle: string;
   // Shown after the rating on the card ("12 reviews", "Your rating").
   meta: string;
@@ -96,7 +97,7 @@ export function RestaurantMap({ restaurants, userLocation }: Props) {
             >
               <View style={[styles.pin, isSelected && styles.pinSelected]}>
                 <Text style={styles.pinText}>
-                  {restaurant.rating.toFixed(1)}★
+                  {restaurant.rating.toFixed(restaurant.ratingDigits ?? 2)}★
                 </Text>
               </View>
             </Marker>
@@ -148,7 +149,7 @@ export function RestaurantMap({ restaurants, userLocation }: Props) {
             ) : null}
             <Text style={styles.cardMeta}>
               <Text style={styles.cardRating}>
-                {selected.rating.toFixed(1)} ★
+                {selected.rating.toFixed(selected.ratingDigits ?? 2)} ★
               </Text>
               {`  ·  ${selected.meta}`}
             </Text>

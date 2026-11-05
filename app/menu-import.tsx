@@ -1,6 +1,12 @@
 import * as ImagePicker from 'expo-image-picker';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { Image } from 'expo-image';
+import {
+  router,
+  Stack,
+  useLocalSearchParams,
+  usePreventRemove,
+} from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,6 +20,7 @@ import {
 
 import { Palette } from '@/constants/theme';
 import { useIsCurator } from '@/lib/admin';
+import { uploadPhoto } from '@/lib/photos';
 import { supabase } from '@/lib/supabase';
 import { fetchTags, Tag } from '@/lib/tags';
 
@@ -28,6 +35,9 @@ type ScannedDish = {
   variants: string[];
   tags: string[];
 };
+
+// Most menu pages read in one go.
+const MAX_PAGES = 10;
 
 type ReviewItem = ScannedDish & {
   key: string;
@@ -88,6 +98,41 @@ export default function MenuImportScreen() {
     null
   );
   const [saving, setSaving] = useState(false);
+  // Photos taken or chosen but not read yet; they're scanned together.
+  const [pages, setPages] = useState<ImagePicker.ImagePickerAsset[]>([]);
+  // Pages read successfully, added to the restaurant's photos on save.
+  const [scannedPages, setScannedPages] = useState<
+    ImagePicker.ImagePickerAsset[]
+  >([]);
+  const [saved, setSaved] = useState(false);
+  // Set when the screen closes, so a scan still running stops quietly.
+  const closed = useRef(false);
+
+  useEffect(
+    () => () => {
+      closed.current = true;
+    },
+    []
+  );
+
+  // Leaving mid-scan, or with dishes not saved yet, asks first.
+  usePreventRemove(
+    progress !== null ||
+      saving ||
+      (!saved && (items.length > 0 || pages.length > 0)),
+    ({ repeat }) => {
+      Alert.alert(
+        progress !== null ? 'Stop reading the menu?' : 'Leave without saving?',
+        progress !== null
+          ? 'The scan will stop and nothing will be added.'
+          : 'The dishes from this menu won’t be added.',
+        [
+          { text: 'Stay', style: 'cancel' },
+          { text: 'Leave', style: 'destructive', onPress: repeat },
+        ]
+      );
+    }
+  );
   const [editingTagsFor, setEditingTagsFor] = useState<string | null>(null);
   const [existing, setExisting] = useState<Map<string, ExistingDish>>(
     new Map()
@@ -151,7 +196,7 @@ export default function MenuImportScreen() {
       base64: true,
     });
 
-    if (!result.canceled) await scan(result.assets);
+    if (!result.canceled) setPages((current) => [...current, ...result.assets]);
   }
 
   async function choosePhotos() {
@@ -165,20 +210,24 @@ export default function MenuImportScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsMultipleSelection: true,
-      selectionLimit: 8,
+      selectionLimit: Math.max(MAX_PAGES - pages.length, 1),
       quality: 0.6,
       base64: true,
     });
 
-    if (!result.canceled) await scan(result.assets);
+    if (!result.canceled) {
+      setPages((current) => [...current, ...result.assets].slice(0, MAX_PAGES));
+    }
   }
 
   // Sends each photo to the menu reader one at a time and merges the
   // results, so a dish on two photos appears once.
   async function scan(assets: ImagePicker.ImagePickerAsset[]) {
+    setPages([]);
     setProgress({ done: 0, total: assets.length });
     const failures: string[] = [];
     const found: ScannedDish[] = [];
+    const read: ImagePicker.ImagePickerAsset[] = [];
 
     for (const [index, asset] of assets.entries()) {
       if (!asset.base64) {
@@ -194,6 +243,8 @@ export default function MenuImportScreen() {
         },
       });
 
+      if (closed.current) return;
+
       if (error) {
         let message = error.message;
 
@@ -208,12 +259,14 @@ export default function MenuImportScreen() {
         failures.push(`Photo ${index + 1}: ${message}`);
       } else {
         found.push(...((data?.dishes ?? []) as ScannedDish[]));
+        read.push(asset);
       }
 
       setProgress({ done: index + 1, total: assets.length });
     }
 
     setItems((current) => mergeDishes(current, found));
+    setScannedPages((current) => [...current, ...read]);
     setProgress(null);
 
     if (failures.length > 0) {
@@ -294,12 +347,15 @@ export default function MenuImportScreen() {
       })),
     });
 
-    setSaving(false);
-
     if (error) {
+      setSaving(false);
       Alert.alert('Error', error.message);
       return;
     }
+
+    await addMenuPhotos();
+    setSaving(false);
+    setSaved(true);
 
     const result = (
       data as { added: number; matched: number; updated: number }[]
@@ -356,15 +412,86 @@ export default function MenuImportScreen() {
     );
   }
 
+  // The scanned menu pages go in the restaurant's photos, marked as the
+  // menu. Best effort: the dishes are already saved if this fails.
+  async function addMenuPhotos() {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user || !restaurantId) return;
+
+      for (const page of scannedPages) {
+        const photoPath = await uploadPhoto(page.uri, user.id);
+        const { error } = await supabase.from('restaurant_photos').insert({
+          restaurant_id: restaurantId,
+          photo_path: photoPath,
+          kind: 'menu',
+        });
+
+        if (error) {
+          await supabase.storage.from('review-photos').remove([photoPath]);
+          throw new Error(error.message);
+        }
+      }
+    } catch (error) {
+      console.log('Menu photos error:', error);
+    }
+  }
+
+  // Pages waiting to be read, then buttons to add more and to scan them.
   function renderPhotoButtons() {
     return (
-      <View style={styles.photoButtons}>
-        <TouchableOpacity style={styles.photoButton} onPress={takePhoto}>
-          <Text style={styles.photoButtonText}>Take a photo</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.photoButton} onPress={choosePhotos}>
-          <Text style={styles.photoButtonText}>Choose photos</Text>
-        </TouchableOpacity>
+      <View>
+        {pages.length > 0 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.pageRow}
+          >
+            {pages.map((page, index) => (
+              <View key={page.uri}>
+                <Image source={{ uri: page.uri }} style={styles.pageThumb} />
+                <TouchableOpacity
+                  style={styles.pageRemove}
+                  onPress={() =>
+                    setPages((current) => current.filter((_, i) => i !== index))
+                  }
+                >
+                  <Text style={styles.pageRemoveText}>×</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </ScrollView>
+        ) : null}
+
+        <View style={styles.photoButtons}>
+          <TouchableOpacity
+            style={styles.photoButton}
+            onPress={takePhoto}
+            disabled={pages.length >= MAX_PAGES}
+          >
+            <Text style={styles.photoButtonText}>
+              {pages.length > 0 ? 'Take another' : 'Take a photo'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.photoButton}
+            onPress={choosePhotos}
+            disabled={pages.length >= MAX_PAGES}
+          >
+            <Text style={styles.photoButtonText}>Choose photos</Text>
+          </TouchableOpacity>
+        </View>
+
+        {pages.length > 0 ? (
+          <TouchableOpacity style={styles.scanButton} onPress={() => scan(pages)}>
+            <Text style={styles.scanButtonText}>
+              Scan {pages.length} {pages.length === 1 ? 'page' : 'pages'}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     );
   }
@@ -390,8 +517,8 @@ export default function MenuImportScreen() {
         ) : items.length === 0 ? (
           <>
             <Text style={styles.subtitle}>
-              Photograph each page of the menu, close enough that the text is
-              sharp. You&apos;ll review every dish before anything is saved
+              Photograph every page of the menu, close enough that the text is
+              sharp, then tap Scan. You&apos;ll review every dish before anything is saved
               {isCurator
                 ? ', and choose whether dishes already on the menu get updated.'
                 : '.'}
@@ -641,6 +768,46 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 21,
     marginBottom: 20,
+  },
+  pageRow: {
+    gap: 10,
+    paddingTop: 6,
+    paddingBottom: 14,
+  },
+  pageThumb: {
+    width: 84,
+    height: 112,
+    borderRadius: 10,
+    backgroundColor: Palette.surface,
+  },
+  pageRemove: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Palette.elevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pageRemoveText: {
+    color: Palette.text,
+    fontSize: 16,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  scanButton: {
+    marginTop: 12,
+    backgroundColor: Palette.accent,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  scanButtonText: {
+    color: Palette.text,
+    fontSize: 15,
+    fontWeight: '700',
   },
   photoButtons: {
     flexDirection: 'row',

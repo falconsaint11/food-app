@@ -75,6 +75,7 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [diary, setDiary] = useState<DiaryEntry[]>([]);
   const [topDishes, setTopDishes] = useState<RankedDish[]>([]);
+  const [topDrinks, setTopDrinks] = useState<RankedDish[]>([]);
   const [topRestaurants, setTopRestaurants] = useState<RankedRestaurant[]>([]);
   const [reviewCount, setReviewCount] = useState(0);
   const [dishCount, setDishCount] = useState(0);
@@ -186,6 +187,14 @@ export default function ProfileScreen() {
       return;
     }
     setTopDishes((rankedDishData ?? []) as unknown as RankedDish[]);
+    // Top drinks are newer; a failure here leaves the section empty.
+    const { data: rankedDrinkData, error: rankedDrinkError } = await supabase
+      .from("drink_rankings")
+      .select("id, rank, dishes (id, name, discontinued_at, restaurants (id, name))")
+      .eq("user_id", user.id)
+      .order("rank", { ascending: true });
+    if (rankedDrinkError) console.log("Top drinks error:", rankedDrinkError.message);
+    setTopDrinks((rankedDrinkData ?? []) as unknown as RankedDish[]);
     const { data: rankedRestaurantData, error: rankedRestaurantError } =
       await supabase
         .from("restaurant_rankings")
@@ -437,6 +446,35 @@ export default function ProfileScreen() {
                 key={item.id}
                 rank={item.rank}
                 title={item.dishes ? dishLabel(item.dishes) : "Unknown dish"}
+                subtitle={item.dishes?.restaurants?.name ?? "Unknown restaurant"}
+                photoUrl={getTopPhotoUrl(topPhotos.byDish, item.dishes?.id)}
+                onPress={() => {
+                  if (!item.dishes?.id) return;
+                  router.push({ pathname: "/dish/[id]", params: { id: item.dishes.id } });
+                }}
+              />
+            ))}
+          </View>
+        )}
+      </View>
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Top Drinks</Text>
+          <TouchableOpacity onPress={() => router.push("/rank-drinks")}>
+            <Text style={styles.rankLink}>Edit Ranking</Text>
+          </TouchableOpacity>
+        </View>
+        {topDrinks.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyText}>Nothing ranked yet.</Text>
+          </View>
+        ) : (
+          <View style={styles.featureGrid}>
+            {topDrinks.slice(0, 4).map((item) => (
+              <TopPickCard
+                key={item.id}
+                rank={item.rank}
+                title={item.dishes ? dishLabel(item.dishes) : "Unknown drink"}
                 subtitle={item.dishes?.restaurants?.name ?? "Unknown restaurant"}
                 photoUrl={getTopPhotoUrl(topPhotos.byDish, item.dishes?.id)}
                 onPress={() => {

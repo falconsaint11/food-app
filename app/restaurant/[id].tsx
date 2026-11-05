@@ -29,7 +29,7 @@ import {
 import { useIsCurator } from '@/lib/admin';
 import { uploadPhoto } from '@/lib/photos';
 import { withoutHiddenUsers } from '@/lib/moderation';
-import { formatRating, useIsPremium } from '@/lib/ratings';
+import { formatAverage, formatRating, useIsPremium } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
 import { Palette } from '@/constants/theme';
 
@@ -46,13 +46,16 @@ type Restaurant = {
   cover_review_id: string | null;
   cover_photo_id: string | null;
   is_food_truck: boolean;
+  latitude: number | null;
+  longitude: number | null;
 };
 
-// A photo of the place itself, added without a review.
+// A photo of the place or its menu, added without a review.
 type PlacePhoto = {
   id: string;
   user_id: string;
   photo_path: string;
+  kind: 'place' | 'menu';
 };
 
 type DishSummary = {
@@ -76,6 +79,8 @@ type DishSummary = {
   tried: boolean;
   // Best review photo of it, if any.
   photoPath: string | null;
+  // Your latest rating of it, at any location.
+  myRating: number | null;
 };
 
 type RestaurantReview = {
@@ -239,7 +244,7 @@ export default function RestaurantDetailScreen() {
   async function loadPlacePhotos(locationIds: string[]) {
     const { data, error } = await supabase
       .from('restaurant_photos')
-      .select('id, user_id, photo_path')
+      .select('id, user_id, photo_path, kind')
       .in('restaurant_id', locationIds)
       .order('created_at', { ascending: false })
       .limit(PHOTO_COUNT);
@@ -358,7 +363,7 @@ export default function RestaurantDetailScreen() {
       const { data: restaurantData, error: restaurantError } = await supabase
         .from('restaurants')
         .select(
-          'id, name, brand_id, cover_review_id, cover_photo_id, is_food_truck, brands (name, cover_review_id, cover_photo_id)'
+          'id, name, brand_id, cover_review_id, cover_photo_id, is_food_truck, latitude, longitude, brands (name, cover_review_id, cover_photo_id)'
         )
         .eq('id', id)
         .maybeSingle();
@@ -602,6 +607,16 @@ export default function RestaurantDetailScreen() {
           .map((review) => review.dish_id)
       );
 
+      // Your latest review of each dish row.
+      const myLatestByDishId = new Map<string, RestaurantReview>();
+      for (const review of allReviews) {
+        if (review.user_id !== user?.id) continue;
+        const latest = myLatestByDishId.get(review.dish_id);
+        if (!latest || review.created_at > latest.created_at) {
+          myLatestByDishId.set(review.dish_id, review);
+        }
+      }
+
       // Same scoring as cover_photos(): likes count double, then stars.
       const bestPhotoByDishId = new Map<string, RestaurantReview>();
       for (const review of visibleReviews) {
@@ -632,6 +647,7 @@ export default function RestaurantDetailScreen() {
           category: string | null;
           addedAt: number;
           tried: boolean;
+          mine: RestaurantReview | null;
           photo: RestaurantReview | null;
         }
       >();
@@ -641,6 +657,7 @@ export default function RestaurantDetailScreen() {
         const key = dish.name_key as string;
         const group = groups.get(key);
         const photo = bestPhotoByDishId.get(dish.id) ?? null;
+        const mine = myLatestByDishId.get(dish.id) ?? null;
         const addedAt = new Date(dish.created_at as string).getTime();
 
         if (!group) {
@@ -655,9 +672,14 @@ export default function RestaurantDetailScreen() {
             category: dish.category,
             addedAt,
             tried: triedDishIds.has(dish.id),
+            mine,
             photo,
           });
           continue;
+        }
+
+        if (mine && (!group.mine || mine.created_at > group.mine.created_at)) {
+          group.mine = mine;
         }
 
         group.ratings.push(...ratings);
@@ -693,6 +715,7 @@ export default function RestaurantDetailScreen() {
           addedAt: group.addedAt,
           tags: [...(tagsByKey.get(nameKey) ?? [])],
           tried: group.tried,
+          myRating: group.mine ? Number(group.mine.rating) : null,
           photoPath: group.photo?.photo_path ?? null,
           reviewCount: group.ratings.length,
           averageRating:
@@ -799,7 +822,7 @@ export default function RestaurantDetailScreen() {
         </View>
 
         <Text style={styles.dishRating}>
-          {averageRating > 0 ? `${averageRating.toFixed(1)} ★` : '—'}
+          {averageRating > 0 ? `${formatAverage(averageRating)} ★` : '—'}
         </Text>
       </TouchableOpacity>
     );
@@ -876,6 +899,11 @@ export default function RestaurantDetailScreen() {
     dish.tags.some((tag) => DRINK_TAGS.includes(tag));
   const topDishes = ranked.filter((dish) => !isDrink(dish)).slice(0, CAROUSEL_COUNT);
   const topDrinks = ranked.filter(isDrink).slice(0, CAROUSEL_COUNT);
+  // Everything you've rated here, dishes and drinks, your favorite first.
+  const myFavorites = dishes
+    .filter((dish) => dish.myRating !== null)
+    .sort((a, b) => (b.myRating ?? 0) - (a.myRating ?? 0))
+    .slice(0, CAROUSEL_COUNT);
 
   const photos = reviews
     .filter((review) => review.photo_path)
@@ -963,7 +991,10 @@ export default function RestaurantDetailScreen() {
               <Text style={styles.foodTruckBadge}>🚚 Food truck</Text>
             ) : null}
 
-            {isCurator ? (
+            {/* Only places without a location on the map can be food trucks. */}
+            {isCurator &&
+            (restaurant.is_food_truck ||
+              (restaurant.latitude === null && restaurant.longitude === null)) ? (
               <TouchableOpacity onPress={toggleFoodTruck}>
                 <Text style={styles.curatorLink}>
                   {restaurant.is_food_truck
@@ -983,7 +1014,7 @@ export default function RestaurantDetailScreen() {
 
           <View style={styles.headerRating}>
             <Text style={styles.ratingNumber}>
-              {restaurantRating > 0 ? restaurantRating.toFixed(1) : '—'} ★
+              {restaurantRating > 0 ? formatAverage(restaurantRating) : '—'} ★
             </Text>
 
             <Text style={styles.ratingLabel}>
@@ -1174,6 +1205,15 @@ export default function RestaurantDetailScreen() {
             </View>
           ) : null}
 
+          {myFavorites.length > 0 ? (
+            <View style={styles.carouselSection}>
+              <Text style={[styles.sectionTitle, styles.inset]}>
+                Your Favorites
+              </Text>
+              <DishCarousel dishes={myFavorites} showMine />
+            </View>
+          ) : null}
+
           {topDrinks.length > 0 ? (
             <View style={styles.carouselSection}>
               <Text style={[styles.sectionTitle, styles.inset]}>Top Drinks</Text>
@@ -1222,6 +1262,11 @@ export default function RestaurantDetailScreen() {
                     contentFit="cover"
                     transition={150}
                   />
+                  {photo.kind === 'menu' ? (
+                    <View style={styles.photoBadge}>
+                      <Text style={styles.photoBadgeText}>Menu</Text>
+                    </View>
+                  ) : null}
                 </TouchableOpacity>
               ))}
 
@@ -1730,6 +1775,20 @@ const styles = StyleSheet.create({
     height: 110,
     borderRadius: 12,
     backgroundColor: Palette.surface,
+  },
+  photoBadge: {
+    position: 'absolute',
+    left: 6,
+    bottom: 6,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  photoBadgeText: {
+    color: Palette.text,
+    fontSize: 11,
+    fontWeight: '700',
   },
   addPhotoTile: {
     alignItems: 'center',

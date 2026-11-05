@@ -63,6 +63,12 @@ export function toStarLevel(rating: number) {
 
 // Ratings can have two decimals (comparisons and Premium edits). Premium
 // members see the exact score; everyone else sees the half-star it rounds to.
+// Public averages (a dish's or restaurant's average rating) show two
+// decimals so close scores are told apart.
+export function formatAverage(average: number) {
+  return average.toFixed(2);
+}
+
 export function formatRating(rating: number | string, exact: boolean) {
   const value = Number(rating);
 

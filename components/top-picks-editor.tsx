@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { Palette } from '@/constants/theme';
+import { formatRating, useIsPremium } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
 
 // Something the user can put in their top 4.
@@ -23,11 +24,13 @@ export type PickOption = {
   saveId: string;
   name: string;
   subtitle: string | null;
+  // The user's latest rating of it, shown while picking.
+  rating: number | null;
 };
 
 type TopPicksEditorProps = {
-  noun: 'dishes' | 'restaurants';
-  rankingTable: 'dish_rankings' | 'restaurant_rankings';
+  noun: 'dishes' | 'drinks' | 'restaurants';
+  rankingTable: 'dish_rankings' | 'drink_rankings' | 'restaurant_rankings';
   idColumn: 'dish_id' | 'restaurant_id';
   // Everything the user rated, and the keys of their current top 4 in order.
   loadOptions: (
@@ -38,14 +41,15 @@ type TopPicksEditorProps = {
 const MAX_PICKS = 4;
 
 // Picks a profile's top 4 dishes or restaurants. The current picks sit in a
-// row at the top (tap to remove), with everything else the user rated below
-// in A–Z order and a search box. Every change saves right away.
+// row at the top (tap to remove), with everything else the user rated below,
+// highest rated first, and a search box. Every change saves right away.
 export function TopPicksEditor({
   noun,
   rankingTable,
   idColumn,
   loadOptions,
 }: TopPicksEditorProps) {
+  const isPremium = useIsPremium();
   const [options, setOptions] = useState<PickOption[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [search, setSearch] = useState('');
@@ -71,7 +75,10 @@ export function TopPicksEditor({
       const result = await loadOptions(user.id);
 
       setOptions(
-        [...result.options].sort((a, b) => a.name.localeCompare(b.name))
+        [...result.options].sort(
+          (a, b) =>
+            (b.rating ?? -1) - (a.rating ?? -1) || a.name.localeCompare(b.name)
+        )
       );
       setSelected(result.selectedKeys.slice(0, MAX_PICKS));
     } catch (error) {
@@ -211,6 +218,11 @@ export function TopPicksEditor({
                 <Text style={styles.slotName} numberOfLines={3}>
                   {option?.name ?? 'Unknown'}
                 </Text>
+                {option?.rating != null ? (
+                  <Text style={styles.slotRating}>
+                    {formatRating(option.rating, isPremium)}★
+                  </Text>
+                ) : null}
               </TouchableOpacity>
             );
           })}
@@ -253,6 +265,11 @@ export function TopPicksEditor({
                 </Text>
               ) : null}
             </View>
+            {item.rating !== null ? (
+              <Text style={styles.rowRating}>
+                {formatRating(item.rating, isPremium)}★
+              </Text>
+            ) : null}
             <Text style={styles.addIcon}>+</Text>
           </TouchableOpacity>
         )}
@@ -377,6 +394,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Palette.textSecondary,
     marginTop: 2,
+  },
+  rowRating: {
+    color: Palette.accent,
+    fontSize: 15,
+    fontWeight: '700',
+    marginRight: 14,
+  },
+  slotRating: {
+    color: Palette.accent,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
   },
   addIcon: {
     color: Palette.accent,

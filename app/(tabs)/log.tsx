@@ -173,7 +173,8 @@ export default function LogScreen() {
   const [manualRestaurant, setManualRestaurant] = useState(false);
 
   const [atManualRestaurant, setAtManualRestaurant] = useState(false);
-  // For a restaurant being added now. Food trucks never keep a location.
+  // For a restaurant being added now. Only places without a location on
+  // the map can be food trucks.
   const [isFoodTruck, setIsFoodTruck] = useState(false);
 
   const [gettingLocation, setGettingLocation] = useState(false);
@@ -1544,7 +1545,10 @@ export default function LogScreen() {
               </TouchableOpacity>
             ) : null}
 
-            {!selectedRestaurantId ? (
+            {!selectedRestaurantId &&
+            latitude === null &&
+            longitude === null &&
+            !atManualRestaurant ? (
               <View style={styles.hereRow}>
                 <Text style={styles.hereText}>🚚 It’s a food truck</Text>
 

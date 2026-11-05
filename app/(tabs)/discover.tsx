@@ -111,6 +111,17 @@ type PopularReview = FriendReview & {
   review_comments: { count: number }[];
 };
 
+// Someone's rating of a restaurant with something written about it.
+type RestaurantReviewCard = {
+  id: string;
+  user_id: string;
+  rating: number;
+  notes: string;
+  restaurantId: string;
+  restaurantName: string;
+  authorName: string;
+};
+
 type TagDish = {
   dish_id: string;
   name: string;
@@ -134,6 +145,9 @@ const REVIEW_SAMPLE = 1000;
 // Popular posts come from this many days back, ranked by likes and comments.
 const POPULAR_DAYS = 7;
 const POPULAR_SAMPLE = 200;
+
+// Restaurant reviews come from this many days back.
+const RESTAURANT_REVIEW_DAYS = 30;
 
 const ROW_COUNT = 10;
 
@@ -290,6 +304,9 @@ export default function DiscoverScreen() {
   const [mapRestaurants, setMapRestaurants] = useState<MapRestaurant[]>([]);
   const [friendReviews, setFriendReviews] = useState<FriendReview[]>([]);
   const [popularReviews, setPopularReviews] = useState<PopularReview[]>([]);
+  const [restaurantReviews, setRestaurantReviews] = useState<
+    RestaurantReviewCard[]
+  >([]);
   const [trending, setTrending] = useState<Ranked[]>([]);
   const [topDishes, setTopDishes] = useState<Ranked[]>([]);
   const [hiddenGems, setHiddenGems] = useState<Ranked[]>([]);
@@ -452,6 +469,107 @@ export default function DiscoverScreen() {
     );
   }
 
+  // Recent restaurant ratings that say something, newest first. A brand-wide
+  // rating links to one of the brand's locations.
+  async function loadRestaurantReviews() {
+    const since = new Date(
+      Date.now() - RESTAURANT_REVIEW_DAYS * 24 * 60 * 60 * 1000
+    ).toISOString();
+
+    const { data, error } = await supabase
+      .from('restaurant_ratings')
+      .select(
+        'id, user_id, rating, notes, restaurant_id, brand_id, restaurants (name, brands (name))'
+      )
+      .not('notes', 'is', null)
+      .not('rating', 'is', null)
+      .gte('visited_at', since)
+      .order('visited_at', { ascending: false })
+      .limit(40);
+
+    if (error) {
+      console.log('Restaurant reviews error:', error.message);
+      return;
+    }
+
+    type Row = {
+      id: string;
+      user_id: string;
+      rating: number;
+      notes: string;
+      restaurant_id: string | null;
+      brand_id: string | null;
+      restaurants: { name: string; brands: { name: string } | null } | null;
+    };
+
+    const rows = (await withoutHiddenUsers(
+      (data ?? []) as unknown as Row[],
+      (row) => row.user_id
+    )).filter((row) => row.notes.trim());
+
+    const brandIds = [
+      ...new Set(
+        rows.filter((row) => !row.restaurant_id).map((row) => row.brand_id!)
+      ),
+    ];
+    const userIds = [...new Set(rows.map((row) => row.user_id))];
+
+    const [{ data: brands }, { data: brandLocations }, { data: profiles }] =
+      await Promise.all([
+        brandIds.length
+          ? supabase.from('brands').select('id, name').in('id', brandIds)
+          : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+        brandIds.length
+          ? supabase.from('restaurants').select('id, brand_id').in('brand_id', brandIds)
+          : Promise.resolve({ data: [] as { id: string; brand_id: string }[] }),
+        userIds.length
+          ? supabase
+              .from('profiles')
+              .select('id, username, display_name')
+              .in('id', userIds)
+          : Promise.resolve({
+              data: [] as {
+                id: string;
+                username: string;
+                display_name: string | null;
+              }[],
+            }),
+      ]);
+
+    const brandName = new Map((brands ?? []).map((brand) => [brand.id, brand.name]));
+    const brandLocation = new Map(
+      (brandLocations ?? []).map((location) => [location.brand_id, location.id])
+    );
+    const authorName = new Map(
+      (profiles ?? []).map((profile) => [
+        profile.id,
+        profile.display_name || profile.username,
+      ])
+    );
+
+    setRestaurantReviews(
+      rows.flatMap((row) => {
+        const restaurantId =
+          row.restaurant_id ?? brandLocation.get(row.brand_id ?? '');
+        if (!restaurantId) return [];
+
+        return [
+          {
+            id: row.id,
+            user_id: row.user_id,
+            rating: Number(row.rating),
+            notes: row.notes.trim(),
+            restaurantId,
+            restaurantName: row.restaurant_id
+              ? (row.restaurants?.brands?.name ?? row.restaurants?.name ?? '')
+              : (brandName.get(row.brand_id ?? '') ?? ''),
+            authorName: authorName.get(row.user_id) ?? 'Someone',
+          },
+        ];
+      })
+    );
+  }
+
   // The first load shows a spinner; later ones keep showing the old content
   // until the new one is ready.
   async function loadExplore(reason: LoadReason) {
@@ -471,6 +589,7 @@ export default function DiscoverScreen() {
       loadFriendReviews(auth.user.id);
     }
     loadPopularReviews();
+    loadRestaurantReviews();
 
     const { data, error } = await supabase
       .from('reviews')
@@ -843,6 +962,7 @@ export default function DiscoverScreen() {
         ''
       }`,
       rating: Number(review.rating),
+      ratingDigits: 1,
       photoPath: review.photo_path,
       onPress: () =>
         router.push({ pathname: '/review/[id]', params: { id: review.id } }),
@@ -863,6 +983,52 @@ export default function DiscoverScreen() {
           .filter(Boolean)
           .join('  ') || undefined,
     };
+  }
+
+  // Quote cards, people you follow first.
+  function renderRestaurantReviews() {
+    if (restaurantReviews.length === 0) return null;
+
+    const ordered = [...restaurantReviews]
+      .sort(
+        (a, b) =>
+          Number(followingIds.includes(b.user_id)) -
+          Number(followingIds.includes(a.user_id))
+      )
+      .slice(0, ROW_COUNT);
+
+    return (
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Restaurant reviews</Text>
+        <Text style={styles.sectionSubtitle}>What people are saying about places</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.quoteRow}
+          style={styles.rowSpacing}
+        >
+          {ordered.map((review) => (
+            <TouchableOpacity
+              key={review.id}
+              style={styles.quoteCard}
+              activeOpacity={0.8}
+              onPress={() => openRestaurant(review.restaurantId)}
+            >
+              <Text style={styles.quoteRestaurant} numberOfLines={1}>
+                {review.restaurantName}
+              </Text>
+              <Text style={styles.quoteRating}>{review.rating.toFixed(1)} ★</Text>
+              <Text style={styles.quoteText} numberOfLines={4}>
+                “{review.notes}”
+              </Text>
+              <Text style={styles.quoteAuthor} numberOfLines={1}>
+                {review.authorName}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+    );
   }
 
   function renderSection(
@@ -1097,6 +1263,8 @@ export default function DiscoverScreen() {
               'The posts people are loving',
               popularReviews.map(popularCard)
             )}
+
+            {renderRestaurantReviews()}
 
             {renderSection(
               'Trending this week',
@@ -1455,6 +1623,42 @@ const styles = StyleSheet.create({
   },
   rowSpacing: {
     marginTop: 12,
+  },
+  quoteRow: {
+    gap: 12,
+    paddingHorizontal: 20,
+  },
+  quoteCard: {
+    width: 260,
+    minHeight: 170,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: Palette.surface,
+    borderWidth: 1,
+    borderColor: Palette.border,
+  },
+  quoteRestaurant: {
+    color: Palette.text,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  quoteRating: {
+    color: Palette.accent,
+    fontSize: 14,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  quoteText: {
+    color: Palette.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 8,
+    flex: 1,
+  },
+  quoteAuthor: {
+    color: Palette.textMuted,
+    fontSize: 13,
+    marginTop: 10,
   },
   emptyText: {
     color: Palette.textMuted,
