@@ -1,4 +1,4 @@
-import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import type * as ImageManipulatorModule from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import {
@@ -46,6 +46,11 @@ type MenuPage = { uri: string; base64: string };
 const PAGE_MAX_SIDE = 2000;
 
 async function preparePage(asset: ImagePicker.ImagePickerAsset): Promise<MenuPage> {
+  // Loaded here rather than at the top, so its native module starts only
+  // when a menu is scanned, not when the app opens.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { ImageManipulator, SaveFormat } =
+    require('expo-image-manipulator') as typeof ImageManipulatorModule;
   const context = ImageManipulator.manipulate(asset.uri);
   const longest = Math.max(asset.width, asset.height);
 
