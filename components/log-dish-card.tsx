@@ -1,8 +1,9 @@
 import * as ImagePicker from "expo-image-picker";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Image,
+  Keyboard,
   StyleSheet,
   Text,
   TextInput,
@@ -106,6 +107,10 @@ export function LogDishCard({
 }: LogDishCardProps) {
   const [results, setResults] = useState<DishResult[]>([]);
 
+  // Bumped by each search and pick, so a slow, older search can't replace
+  // newer suggestions.
+  const searchVersion = useRef(0);
+
   const [variants, setVariants] = useState<DishResult[]>([]);
 
   // The "+ New" variant being typed, or null when the input is closed.
@@ -149,15 +154,20 @@ export function LogDishCard({
       ...(text.trim().length < 2 ? { tags: [], tagsTouched: false } : {}),
     });
 
+    const version = ++searchVersion.current;
+
     if (text.trim().length < 2) {
       setResults([]);
       return;
     }
 
-    setResults(await onSearch(text.trim()));
+    const found = await onSearch(text.trim());
+    if (version === searchVersion.current) setResults(found);
   }
 
   async function pickSuggestion(dish: DishResult) {
+    searchVersion.current++;
+    Keyboard.dismiss();
     onChange({
       name: dish.name,
       matchedDish: dish,

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -229,6 +230,10 @@ export default function LogScreen() {
     null,
   );
 
+  // Bumped by each search and pick, so a slow, older response can't replace
+  // newer results (or bring the list back after a pick).
+  const searchVersion = useRef(0);
+
   // Groups Google autocomplete + details calls into one billed session.
   const googleSessionToken = useRef<string | null>(null);
 
@@ -346,6 +351,8 @@ export default function LogScreen() {
 
     setGoogleLoading(true);
 
+    const version = searchVersion.current;
+
     try {
       const { data, error } = await supabase.functions.invoke(
         "google-places-autocomplete",
@@ -363,6 +370,8 @@ export default function LogScreen() {
         },
       );
 
+      if (version !== searchVersion.current) return;
+
       if (error) {
         console.log("Google autocomplete function error:", error.message);
 
@@ -379,9 +388,9 @@ export default function LogScreen() {
     } catch (error) {
       console.log("Google autocomplete error:", error);
 
-      setGoogleResults([]);
+      if (version === searchVersion.current) setGoogleResults([]);
     } finally {
-      setGoogleLoading(false);
+      if (version === searchVersion.current) setGoogleLoading(false);
     }
   }
 
@@ -397,10 +406,6 @@ export default function LogScreen() {
     setIsFoodTruck(false);
 
     setWebsite(null);
-
-    setRestaurantRating(0);
-
-    setRestaurantNotes("");
 
     setAddress("");
 
@@ -419,6 +424,8 @@ export default function LogScreen() {
     setRestaurantName(text);
 
     clearRestaurant();
+
+    const version = ++searchVersion.current;
 
     const trimmed = text.trim();
 
@@ -444,6 +451,8 @@ export default function LogScreen() {
       .ilike("name", `%${trimmed}%`)
       .limit(8);
 
+    if (version !== searchVersion.current) return;
+
     if (error) {
       console.log("Restaurant search error:", error.message);
     } else {
@@ -467,6 +476,10 @@ export default function LogScreen() {
     if (googleSearchTimeout.current) {
       clearTimeout(googleSearchTimeout.current);
     }
+
+    searchVersion.current++;
+
+    Keyboard.dismiss();
 
     clearRestaurant();
 
@@ -513,6 +526,10 @@ export default function LogScreen() {
     if (googleSearchTimeout.current) {
       clearTimeout(googleSearchTimeout.current);
     }
+
+    searchVersion.current++;
+
+    Keyboard.dismiss();
 
     setGoogleLoading(true);
 
@@ -944,19 +961,46 @@ export default function LogScreen() {
 
   // Each save is one visit to this location, with the restaurant stars if
   // given; the restaurant page counts visits and averages the stars.
-  async function recordVisit(userId: string, restaurantId: string) {
-    const { error } = await supabase.from("restaurant_ratings").insert({
-      user_id: userId,
-      restaurant_id: restaurantId,
-      rating: restaurantRating > 0 ? restaurantRating : null,
-      notes: restaurantNotes.trim() || null,
-    });
+  // Friends are tagged on the visit only when no dishes were logged;
+  // otherwise they're tagged on each dish review.
+  async function recordVisit(
+    userId: string,
+    restaurantId: string,
+    tagFriends: boolean,
+  ) {
+    const { data, error } = await supabase
+      .from("restaurant_ratings")
+      .insert({
+        user_id: userId,
+        restaurant_id: restaurantId,
+        rating: restaurantRating > 0 ? restaurantRating : null,
+        notes: restaurantNotes.trim() || null,
+      })
+      .select("id")
+      .single();
 
     if (error) {
       console.log("Visit error:", error.message);
+      return { error: error.message, tagsFailed: false };
     }
 
-    return error?.message ?? null;
+    if (tagFriends && selectedFriends.length > 0) {
+      const { error: tagsError } = await supabase
+        .from("restaurant_rating_tags")
+        .insert(
+          selectedFriends.map((friendId) => ({
+            restaurant_rating_id: data.id,
+            tagged_user_id: friendId,
+          })),
+        );
+
+      if (tagsError) {
+        console.log("Restaurant tags error:", tagsError.message);
+        return { error: null, tagsFailed: true };
+      }
+    }
+
+    return { error: null, tagsFailed: false };
   }
 
   // Saves one dish review plus its friend tags and dish tag votes. Throws if
@@ -1077,15 +1121,6 @@ export default function LogScreen() {
 
         return;
       }
-
-      if (selectedFriends.length > 0) {
-        Alert.alert(
-          "Add a dish",
-          "Friends are tagged on dish reviews. Add a dish, or clear your friends to just rate the restaurant.",
-        );
-
-        return;
-      }
     }
 
     const matches = new Map<string, DishResult | null>();
@@ -1142,13 +1177,19 @@ export default function LogScreen() {
         namedDishes.length === 0 || failedDishes.length < namedDishes.length;
 
       if (anythingSaved) {
-        const visitError = await recordVisit(user.id, restaurantId);
+        const visit = await recordVisit(
+          user.id,
+          restaurantId,
+          namedDishes.length === 0,
+        );
 
-        if (visitError) {
-          if (namedDishes.length === 0) throw new Error(visitError);
+        if (visit.error) {
+          if (namedDishes.length === 0) throw new Error(visit.error);
 
           if (restaurantRating > 0) failedExtras.add("the restaurant rating");
         }
+
+        if (visit.tagsFailed) failedExtras.add("friend tags");
       }
 
       if (failedDishes.length > 0) {
@@ -1168,7 +1209,9 @@ export default function LogScreen() {
       Alert.alert(
         savedCount === 0 ? "Rated!" : "Logged!",
         savedCount === 0
-          ? `Your rating for ${restaurantName.trim()} was saved.`
+          ? failedExtras.size === 0
+            ? `Your rating for ${restaurantName.trim()} was saved.`
+            : `Your rating for ${restaurantName.trim()} was saved, but friend tags couldn't be saved.`
           : failedExtras.size === 0
             ? `${plural(savedCount, "dish")} from ${restaurantName.trim()} added to your diary.`
             : `${plural(savedCount, "dish")} added to your diary, but ${[...failedExtras].join(" and ")} couldn't be saved.`,
@@ -1197,6 +1240,10 @@ export default function LogScreen() {
     clearRestaurant();
 
     setDishes([createDishEntry()]);
+
+    setRestaurantRating(0);
+
+    setRestaurantNotes("");
 
     setSelectedFriends([]);
 
@@ -1440,14 +1487,6 @@ export default function LogScreen() {
               </View>
             ) : null}
 
-            {googleLoading ? (
-              <View style={styles.googleLoadingRow}>
-                <ActivityIndicator size="small" />
-
-                <Text style={styles.googleLoadingText}>Searching nearby…</Text>
-              </View>
-            ) : null}
-
             {googleResults.length > 0 ? (
               <View style={styles.resultsBox}>
                 <Text style={styles.resultsLabel}>Nearby on Google</Text>
@@ -1484,7 +1523,14 @@ export default function LogScreen() {
               </View>
             ) : null}
 
-            {restaurantName.trim().length >= 2 && !googleLoading ? (
+            {/* Below the results, so the list doesn't jump while searching. */}
+            {googleLoading ? (
+              <View style={styles.googleLoadingRow}>
+                <ActivityIndicator size="small" />
+
+                <Text style={styles.googleLoadingText}>Searching nearby…</Text>
+              </View>
+            ) : restaurantName.trim().length >= 2 ? (
               <TouchableOpacity onPress={addRestaurantByName}>
                 <Text style={styles.fallbackLink}>
                   Can’t find it? Add “{restaurantName.trim()}” by name

@@ -1,3 +1,4 @@
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import {
@@ -35,6 +36,36 @@ type ScannedDish = {
   variants: string[];
   tags: string[];
 };
+
+// A menu page ready to send: shrunk to a JPEG the menu reader accepts.
+type MenuPage = { uri: string; base64: string };
+
+// Longest side of a page sent to the menu reader. Big enough for small menu
+// text, small enough to stay well under the reader's 5 MB limit even for
+// full-resolution screenshots.
+const PAGE_MAX_SIDE = 2000;
+
+async function preparePage(asset: ImagePicker.ImagePickerAsset): Promise<MenuPage> {
+  const context = ImageManipulator.manipulate(asset.uri);
+  const longest = Math.max(asset.width, asset.height);
+
+  if (longest > PAGE_MAX_SIDE) {
+    context.resize(
+      asset.width >= asset.height
+        ? { width: PAGE_MAX_SIDE, height: null }
+        : { width: null, height: PAGE_MAX_SIDE }
+    );
+  }
+
+  const rendered = await context.renderAsync();
+  const result = await rendered.saveAsync({
+    format: SaveFormat.JPEG,
+    compress: 0.7,
+    base64: true,
+  });
+
+  return { uri: result.uri, base64: result.base64 ?? '' };
+}
 
 // Most menu pages read in one go.
 const MAX_PAGES = 10;
@@ -99,11 +130,12 @@ export default function MenuImportScreen() {
   );
   const [saving, setSaving] = useState(false);
   // Photos taken or chosen but not read yet; they're scanned together.
-  const [pages, setPages] = useState<ImagePicker.ImagePickerAsset[]>([]);
+  const [pages, setPages] = useState<MenuPage[]>([]);
   // Pages read successfully, added to the restaurant's photos on save.
-  const [scannedPages, setScannedPages] = useState<
-    ImagePicker.ImagePickerAsset[]
-  >([]);
+  const [scannedPages, setScannedPages] = useState<MenuPage[]>([]);
+  // True from opening the camera or library until the photos are ready;
+  // the library can take a few seconds to hand over several photos.
+  const [preparing, setPreparing] = useState(false);
   const [saved, setSaved] = useState(false);
   // Set when the screen closes, so a scan still running stops quietly.
   const closed = useRef(false);
@@ -190,13 +222,18 @@ export default function MenuImportScreen() {
       return;
     }
 
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
-      quality: 0.6,
-      base64: true,
-    });
+    setPreparing(true);
 
-    if (!result.canceled) setPages((current) => [...current, ...result.assets]);
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        quality: 0.8,
+      });
+
+      if (!result.canceled) await addPages(result.assets);
+    } finally {
+      setPreparing(false);
+    }
   }
 
   async function choosePhotos() {
@@ -207,27 +244,55 @@ export default function MenuImportScreen() {
       return;
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: true,
-      selectionLimit: Math.max(MAX_PAGES - pages.length, 1),
-      quality: 0.6,
-      base64: true,
-    });
+    setPreparing(true);
 
-    if (!result.canceled) {
-      setPages((current) => [...current, ...result.assets].slice(0, MAX_PAGES));
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        selectionLimit: Math.max(MAX_PAGES - pages.length, 1),
+        quality: 0.8,
+      });
+
+      if (!result.canceled) await addPages(result.assets);
+    } finally {
+      setPreparing(false);
+    }
+  }
+
+  async function addPages(assets: ImagePicker.ImagePickerAsset[]) {
+    const ready: MenuPage[] = [];
+    let failed = 0;
+
+    for (const asset of assets) {
+      try {
+        ready.push(await preparePage(asset));
+      } catch (error) {
+        console.log('Menu page error:', error);
+        failed++;
+      }
+    }
+
+    if (closed.current) return;
+
+    setPages((current) => [...current, ...ready].slice(0, MAX_PAGES));
+
+    if (failed > 0) {
+      Alert.alert(
+        'Some photos couldn’t be used',
+        `${failed} ${failed === 1 ? 'photo' : 'photos'} couldn’t be opened. Try taking ${failed === 1 ? 'it' : 'them'} again.`
+      );
     }
   }
 
   // Sends each photo to the menu reader one at a time and merges the
   // results, so a dish on two photos appears once.
-  async function scan(assets: ImagePicker.ImagePickerAsset[]) {
+  async function scan(assets: MenuPage[]) {
     setPages([]);
     setProgress({ done: 0, total: assets.length });
     const failures: string[] = [];
     const found: ScannedDish[] = [];
-    const read: ImagePicker.ImagePickerAsset[] = [];
+    const read: MenuPage[] = [];
 
     for (const [index, asset] of assets.entries()) {
       if (!asset.base64) {
@@ -238,7 +303,7 @@ export default function MenuImportScreen() {
       const { data, error } = await supabase.functions.invoke('menu-scan', {
         body: {
           image: asset.base64,
-          mediaType: asset.mimeType ?? 'image/jpeg',
+          mediaType: 'image/jpeg',
           restaurantId,
         },
       });
@@ -466,11 +531,18 @@ export default function MenuImportScreen() {
           </ScrollView>
         ) : null}
 
-        <View style={styles.photoButtons}>
+        {preparing ? (
+          <View style={styles.progress}>
+            <ActivityIndicator color={Palette.accent} />
+            <Text style={styles.progressText}>Preparing photos…</Text>
+          </View>
+        ) : null}
+
+        <View style={[styles.photoButtons, preparing && styles.buttonsBusy]}>
           <TouchableOpacity
             style={styles.photoButton}
             onPress={takePhoto}
-            disabled={pages.length >= MAX_PAGES}
+            disabled={preparing || pages.length >= MAX_PAGES}
           >
             <Text style={styles.photoButtonText}>
               {pages.length > 0 ? 'Take another' : 'Take a photo'}
@@ -479,13 +551,13 @@ export default function MenuImportScreen() {
           <TouchableOpacity
             style={styles.photoButton}
             onPress={choosePhotos}
-            disabled={pages.length >= MAX_PAGES}
+            disabled={preparing || pages.length >= MAX_PAGES}
           >
             <Text style={styles.photoButtonText}>Choose photos</Text>
           </TouchableOpacity>
         </View>
 
-        {pages.length > 0 ? (
+        {pages.length > 0 && !preparing ? (
           <TouchableOpacity style={styles.scanButton} onPress={() => scan(pages)}>
             <Text style={styles.scanButtonText}>
               Scan {pages.length} {pages.length === 1 ? 'page' : 'pages'}
@@ -808,6 +880,9 @@ const styles = StyleSheet.create({
     color: Palette.text,
     fontSize: 15,
     fontWeight: '700',
+  },
+  buttonsBusy: {
+    opacity: 0.4,
   },
   photoButtons: {
     flexDirection: 'row',

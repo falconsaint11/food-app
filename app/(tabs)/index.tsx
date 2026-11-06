@@ -58,6 +58,7 @@ type RestaurantFeedItem = {
   restaurantName: string;
   city: string | null;
   profiles: FeedItem["profiles"];
+  tagged: { id: string; username: string }[];
 };
 type FeedEntry =
   | { kind: "dish"; at: string; item: FeedItem }
@@ -204,12 +205,32 @@ export default function HomeScreen() {
       } | null;
     };
     const rows = (data ?? []) as unknown as Row[];
+    // Friends tagged on visits logged without dishes.
+    const { data: tagRows, error: tagsError } = rows.length
+      ? await supabase
+          .from("restaurant_rating_tags")
+          .select("restaurant_rating_id, tagged_user_id")
+          .in(
+            "restaurant_rating_id",
+            rows.map((row) => row.id),
+          )
+      : { data: [], error: null };
+    if (tagsError) console.log("Restaurant tags error:", tagsError.message);
+    const tags = (tagRows ?? []) as {
+      restaurant_rating_id: string;
+      tagged_user_id: string;
+    }[];
     const brandIds = [
       ...new Set(
         rows.filter((row) => !row.restaurant_id).map((row) => row.brand_id!),
       ),
     ];
-    const ids = [...new Set(rows.map((row) => row.user_id))];
+    const ids = [
+      ...new Set([
+        ...rows.map((row) => row.user_id),
+        ...tags.map((tag) => tag.tagged_user_id),
+      ]),
+    ];
     const [{ data: brands }, { data: brandLocations }, { data: profiles }] =
       await Promise.all([
         brandIds.length
@@ -257,6 +278,14 @@ export default function HomeScreen() {
             : (brandName.get(row.brand_id ?? "") ?? ""),
           city: row.restaurant_id ? (row.restaurants?.city ?? null) : null,
           profiles: profileById.get(row.user_id) ?? null,
+          tagged: tags
+            .filter((tag) => tag.restaurant_rating_id === row.id)
+            .flatMap((tag) => {
+              const profile = profileById.get(tag.tagged_user_id);
+              return profile
+                ? [{ id: profile.id, username: profile.username }]
+                : [];
+            }),
         },
       ];
     });
@@ -377,6 +406,26 @@ export default function HomeScreen() {
           </Text>
         </View>
         {item.notes ? <Text style={styles.review}>{item.notes}</Text> : null}
+        {item.tagged.length > 0 ? (
+          <View style={styles.wentWithRow}>
+            <Text style={styles.wentWithLabel}>Went with </Text>
+            {item.tagged.map((friend, i) => (
+              <TouchableOpacity
+                key={friend.id}
+                onPress={() =>
+                  friend.id === currentUserId
+                    ? router.push("/profile")
+                    : router.push(`/user/${friend.id}`)
+                }
+              >
+                <Text style={styles.tagLink}>
+                  @{friend.username}
+                  {i < item.tagged.length - 1 ? ", " : ""}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
       </View>
     );
   }

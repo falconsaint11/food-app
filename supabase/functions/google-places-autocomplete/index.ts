@@ -6,6 +6,10 @@
 // hotel, and food trucks without an address still show up. Food places come
 // first; plain addresses and cities are left out.
 //
+// Google's location bias is weak (typing "chicha" in Chandler listed the
+// Las Vegas and LA locations before the one a minute away), so places within
+// NEARBY_METERS come first, nearest first, then everything else.
+//
 // Deploy:  supabase functions deploy google-places-autocomplete
 // Secret:  supabase secrets set GOOGLE_PLACES_API_KEY=...
 //
@@ -25,8 +29,15 @@ const FOOD_PRIMARY_TYPES = [
 const FOOD_TYPE =
   /restaurant|food|cafe|coffee|bakery|(^|_)bar(_|$)|meal|juice|smoothie|ice_cream|dessert|(^|_)tea(_|$)|deli|pizza|sandwich|brew|winery|donut|bagel|acai|confection|candy|chocolate/;
 
+// About 25 miles.
+const NEARBY_METERS = 40000;
+
 type Suggestion = {
-  placePrediction?: { placeId?: string; types?: string[] };
+  placePrediction?: {
+    placeId?: string;
+    types?: string[];
+    distanceMeters?: number;
+  };
 };
 
 function json(body: unknown, status = 200) {
@@ -70,6 +81,7 @@ async function autocomplete(
           "suggestions.placePrediction.structuredFormat.mainText.text",
           "suggestions.placePrediction.structuredFormat.secondaryText.text",
           "suggestions.placePrediction.types",
+          "suggestions.placePrediction.distanceMeters",
         ].join(","),
       },
       body: JSON.stringify(body),
@@ -118,8 +130,10 @@ Deno.serve(async (req) => {
 
     if (typeof latitude === "number" && typeof longitude === "number") {
       base.locationBias = {
-        circle: { center: { latitude, longitude }, radius: 50000 },
+        circle: { center: { latitude, longitude }, radius: 20000 },
       };
+      // Makes Google return each place's distance from the user.
+      base.origin = { latitude, longitude };
     }
 
     const [food, anything] = await Promise.all([
@@ -142,7 +156,17 @@ Deno.serve(async (req) => {
       suggestions.push(suggestion);
     }
 
-    return json({ suggestions });
+    // Nearby places first, nearest first; the rest keep their order.
+    const distance = (suggestion: Suggestion) =>
+      suggestion.placePrediction?.distanceMeters ?? Infinity;
+    const nearby = suggestions
+      .filter((suggestion) => distance(suggestion) <= NEARBY_METERS)
+      .sort((a, b) => distance(a) - distance(b));
+    const farther = suggestions.filter(
+      (suggestion) => distance(suggestion) > NEARBY_METERS,
+    );
+
+    return json({ suggestions: [...nearby, ...farther] });
   } catch (error) {
     console.error(error);
 

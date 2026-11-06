@@ -27,9 +27,9 @@ export function getRatingLabel(value: number) {
 
   if (value === 3.5) return "Good";
 
-  if (value === 4) return "Great";
+  if (value === 4) return "Really Good";
 
-  if (value === 4.5) return "Amazing";
+  if (value === 4.5) return "Great";
 
   if (value === 5) return "Perfection";
 
