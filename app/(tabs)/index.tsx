@@ -47,10 +47,26 @@ type FeedItem = {
     id: string;
   }[];
 };
+// A rating of a whole restaurant, shown in the feed next to dish reviews.
+type RestaurantFeedItem = {
+  id: string;
+  user_id: string;
+  rating: number;
+  notes: string | null;
+  visited_at: string;
+  restaurantId: string;
+  restaurantName: string;
+  city: string | null;
+  profiles: FeedItem["profiles"];
+};
+type FeedEntry =
+  | { kind: "dish"; at: string; item: FeedItem }
+  | { kind: "restaurant"; at: string; item: RestaurantFeedItem };
+const FEED_SIZE = 30;
 const reactionOrder: ReactionType[] = ["😂", "🔥", "🤤", "❤️"];
 export default function HomeScreen() {
   const isPremium = useIsPremium();
-  const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [feed, setFeed] = useState<FeedEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedReviews, setExpandedReviews] = useState<string[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -123,13 +139,127 @@ export default function HomeScreen() {
       .order("created_at", {
         ascending: false,
       })
-      .limit(30);
+      .limit(FEED_SIZE);
+    const restaurantItems = await loadRestaurantFeed(feedUserIds);
     setLoading(false);
     if (error) {
       Alert.alert("Feed error", error.message);
       return;
     }
-    setFeed((data ?? []) as unknown as FeedItem[]);
+    const entries: FeedEntry[] = [
+      ...((data ?? []) as unknown as FeedItem[]).map((item) => ({
+        kind: "dish" as const,
+        at: item.created_at,
+        item,
+      })),
+      ...restaurantItems.map((item) => ({
+        kind: "restaurant" as const,
+        at: item.visited_at,
+        item,
+      })),
+    ];
+    entries.sort((a, b) => b.at.localeCompare(a.at));
+    setFeed(entries.slice(0, FEED_SIZE));
+  }
+  // Restaurant ratings by you and the people you follow. Brand-wide ratings
+  // have no location, so they link to any of the brand's.
+  async function loadRestaurantFeed(
+    userIds: string[],
+  ): Promise<RestaurantFeedItem[]> {
+    const { data, error } = await supabase
+      .from("restaurant_ratings")
+      .select(
+        `
+        id,
+        user_id,
+        rating,
+        notes,
+        visited_at,
+        restaurant_id,
+        brand_id,
+        restaurants (id, name, city, brands (name))
+      `,
+      )
+      .in("user_id", userIds)
+      .not("rating", "is", null)
+      .order("visited_at", { ascending: false })
+      .limit(FEED_SIZE);
+    if (error) {
+      console.log("Restaurant feed error:", error.message);
+      return [];
+    }
+    type Row = {
+      id: string;
+      user_id: string;
+      rating: number;
+      notes: string | null;
+      visited_at: string;
+      restaurant_id: string | null;
+      brand_id: string | null;
+      restaurants: {
+        id: string;
+        name: string;
+        city: string | null;
+        brands: { name: string } | null;
+      } | null;
+    };
+    const rows = (data ?? []) as unknown as Row[];
+    const brandIds = [
+      ...new Set(
+        rows.filter((row) => !row.restaurant_id).map((row) => row.brand_id!),
+      ),
+    ];
+    const ids = [...new Set(rows.map((row) => row.user_id))];
+    const [{ data: brands }, { data: brandLocations }, { data: profiles }] =
+      await Promise.all([
+        brandIds.length
+          ? supabase.from("brands").select("id, name").in("id", brandIds)
+          : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+        brandIds.length
+          ? supabase
+              .from("restaurants")
+              .select("id, brand_id")
+              .in("brand_id", brandIds)
+          : Promise.resolve({ data: [] as { id: string; brand_id: string }[] }),
+        ids.length
+          ? supabase
+              .from("profiles")
+              .select("id, username, display_name, avatar_path")
+              .in("id", ids)
+          : Promise.resolve({
+              data: [] as {
+                id: string;
+                username: string;
+                display_name: string | null;
+                avatar_path: string | null;
+              }[],
+            }),
+      ]);
+    const brandName = new Map((brands ?? []).map((b) => [b.id, b.name]));
+    const brandLocation = new Map(
+      (brandLocations ?? []).map((l) => [l.brand_id, l.id]),
+    );
+    const profileById = new Map((profiles ?? []).map((p) => [p.id, p]));
+    return rows.flatMap((row) => {
+      const restaurantId =
+        row.restaurant_id ?? brandLocation.get(row.brand_id ?? "");
+      if (!restaurantId) return [];
+      return [
+        {
+          id: row.id,
+          user_id: row.user_id,
+          rating: Number(row.rating),
+          notes: row.notes?.trim() || null,
+          visited_at: row.visited_at,
+          restaurantId,
+          restaurantName: row.restaurant_id
+            ? (row.restaurants?.brands?.name ?? row.restaurants?.name ?? "")
+            : (brandName.get(row.brand_id ?? "") ?? ""),
+          city: row.restaurant_id ? (row.restaurants?.city ?? null) : null,
+          profiles: profileById.get(row.user_id) ?? null,
+        },
+      ];
+    });
   }
   function formatDate(date: string | null, fallback: string) {
     if (date) {
@@ -168,6 +298,88 @@ export default function HomeScreen() {
     const { data } = supabase.storage.from("profile-photos").getPublicUrl(path);
     return data.publicUrl;
   }
+  function renderUserRow(
+    userId: string,
+    profile: FeedItem["profiles"],
+    dateLine: string,
+  ) {
+    const isOwnPost = userId === currentUserId;
+    const profilePhotoUrl = profile?.avatar_path
+      ? getProfilePhotoUrl(profile.avatar_path)
+      : null;
+    return (
+      <TouchableOpacity
+        onPress={() => {
+          if (isOwnPost) {
+            router.push("/profile");
+          } else {
+            router.push(`/user/${userId}`);
+          }
+        }}
+      >
+        <View style={styles.userRow}>
+          {profilePhotoUrl ? (
+            <Image
+              source={{
+                uri: profilePhotoUrl,
+              }}
+              style={styles.avatarImage}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {(profile?.display_name || profile?.username || "U")
+                  .charAt(0)
+                  .toUpperCase()}
+              </Text>
+            </View>
+          )}
+          <View style={styles.userInfo}>
+            <Text style={styles.userName}>
+              {profile?.display_name || profile?.username || "User"}
+              {isOwnPost ? " · You" : ""}
+            </Text>
+            <Text style={styles.userHandle}>
+              @{profile?.username ?? "unknown"}
+            </Text>
+            <Text style={styles.date}>{dateLine}</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  }
+  function renderRestaurantCard(item: RestaurantFeedItem) {
+    const openRestaurant = () =>
+      router.push({
+        pathname: "/restaurant/[id]",
+        params: { id: item.restaurantId },
+      });
+    return (
+      <View key={`restaurant-${item.id}`} style={styles.card}>
+        {renderUserRow(
+          item.user_id,
+          item.profiles,
+          `Visited ${formatDate(null, item.visited_at)}`,
+        )}
+        <View style={styles.foodRow}>
+          <View style={styles.foodInfo}>
+            <Text style={styles.restaurantLabel}>Rated the restaurant</Text>
+            <TouchableOpacity onPress={openRestaurant}>
+              <Text style={styles.dishName}>
+                {item.restaurantName}
+                {item.city ? ` · ${item.city}` : ""}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.rating}>
+            {formatRating(item.rating, isPremium)}★
+          </Text>
+        </View>
+        {item.notes ? <Text style={styles.review}>{item.notes}</Text> : null}
+      </View>
+    );
+  }
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -189,8 +401,11 @@ export default function HomeScreen() {
           </Text>
         </View>
       ) : (
-        feed.map((item) => {
-          const isOwnPost = item.user_id === currentUserId;
+        feed.map((entry) => {
+          if (entry.kind === "restaurant") {
+            return renderRestaurantCard(entry.item);
+          }
+          const item = entry.item;
           const commentCount = item.review_comments?.length ?? 0;
           const expanded = expandedReviews.includes(item.id);
           const reviewText = item.review_text ?? "";
@@ -203,58 +418,13 @@ export default function HomeScreen() {
           const photoUrl = item.photo_path
             ? getPhotoUrl(item.photo_path)
             : null;
-          const profilePhotoUrl = item.profiles?.avatar_path
-            ? getProfilePhotoUrl(item.profiles.avatar_path)
-            : null;
           return (
             <View key={item.id} style={styles.card}>
-              <TouchableOpacity
-                onPress={() => {
-                  if (isOwnPost) {
-                    router.push("/profile");
-                  } else {
-                    router.push(`/user/${item.user_id}`);
-                  }
-                }}
-              >
-                <View style={styles.userRow}>
-                  {profilePhotoUrl ? (
-                    <Image
-                      source={{
-                        uri: profilePhotoUrl,
-                      }}
-                      style={styles.avatarImage}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <View style={styles.avatar}>
-                      <Text style={styles.avatarText}>
-                        {(
-                          item.profiles?.display_name ||
-                          item.profiles?.username ||
-                          "U"
-                        )
-                          .charAt(0)
-                          .toUpperCase()}
-                      </Text>
-                    </View>
-                  )}
-                  <View style={styles.userInfo}>
-                    <Text style={styles.userName}>
-                      {item.profiles?.display_name ||
-                        item.profiles?.username ||
-                        "User"}
-                      {isOwnPost ? " · You" : ""}
-                    </Text>
-                    <Text style={styles.userHandle}>
-                      @{item.profiles?.username ?? "unknown"}
-                    </Text>
-                    <Text style={styles.date}>
-                      Eaten {formatDate(item.date_eaten, item.created_at)}
-                    </Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
+              {renderUserRow(
+                item.user_id,
+                item.profiles,
+                `Eaten ${formatDate(item.date_eaten, item.created_at)}`,
+              )}
               <View style={styles.foodRow}>
                 <View style={styles.foodInfo}>
                   <TouchableOpacity
@@ -474,6 +644,12 @@ const styles = StyleSheet.create({
     color: Palette.textBody,
     marginTop: 3,
     fontWeight: "600",
+  },
+  restaurantLabel: {
+    fontSize: 13,
+    color: Palette.textMuted,
+    fontWeight: "600",
+    marginBottom: 2,
   },
   rating: {
     color: Palette.accent,

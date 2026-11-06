@@ -327,6 +327,9 @@ export default function DiscoverScreen() {
     useCallback(() => {
       if (Date.now() - loadedAt.current > FRESH_FOR_MS) {
         loadExplore('focus');
+      } else {
+        // Follows made elsewhere (like on a profile) show on the buttons.
+        loadFollowingIds();
       }
 
       fetchTags()
@@ -373,13 +376,22 @@ export default function DiscoverScreen() {
     }
   }
 
-  async function loadFriendReviews(userId: string) {
+  async function fetchFollowingIds(userId: string) {
     const { data: followData } = await supabase
       .from('follows')
       .select('following_id')
       .eq('follower_id', userId);
 
-    const ids = (followData ?? []).map((row) => row.following_id as string);
+    return (followData ?? []).map((row) => row.following_id as string);
+  }
+
+  async function loadFollowingIds() {
+    const { data: auth } = await supabase.auth.getUser();
+    if (auth.user) setFollowingIds(await fetchFollowingIds(auth.user.id));
+  }
+
+  async function loadFriendReviews(userId: string) {
+    const ids = await fetchFollowingIds(userId);
     setFollowingIds(ids);
 
     if (ids.length === 0) {
@@ -918,7 +930,8 @@ export default function DiscoverScreen() {
           .from('follows')
           .insert({ follower_id: currentUserId, following_id: profileId });
 
-    if (error) {
+    // 23505 = unique violation: already following (followed elsewhere).
+    if (error && error.code !== '23505') {
       Alert.alert(isFollowing ? 'Unfollow error' : 'Follow error', error.message);
       return;
     }

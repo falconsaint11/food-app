@@ -56,7 +56,8 @@ export default function RestaurantPhotoScreen() {
         supabase
           .from('restaurant_photos')
           .select(
-            'id, user_id, photo_path, kind, created_at, restaurant_id, restaurants (name, brand_id, cover_photo_id, brands (name, cover_photo_id))'
+            // Named, since restaurants.cover_photo_id also links the tables.
+            'id, user_id, photo_path, kind, created_at, restaurant_id, restaurants!restaurant_photos_restaurant_id_fkey (name, brand_id, cover_photo_id, brands (name, cover_photo_id))'
           )
           .eq('id', id)
           .maybeSingle(),

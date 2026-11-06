@@ -570,6 +570,12 @@ export default function UserProfileScreen() {
           following_id: id,
         });
 
+      // 23505 = unique violation: already following.
+      if (error?.code === "23505") {
+        setIsFollowing(true);
+        return;
+      }
+
       if (error) {
         Alert.alert(
           "Follow error",
