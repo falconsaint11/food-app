@@ -63,7 +63,8 @@
         {
           "locationWhenInUsePermission": "Wotri uses your location to show the best spots near you and to find the restaurant you’re at."
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,

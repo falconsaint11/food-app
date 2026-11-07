@@ -1,3 +1,4 @@
+import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -640,23 +641,25 @@ export default function EditReviewScreen() {
             Date eaten
           </Text>
 
-          <TextInput
-            style={styles.dateInput}
-            value={dateEaten}
-            onChangeText={
-              setDateEaten
-            }
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={Palette.textMuted}
-            autoCapitalize="none"
-            maxLength={10}
-          />
-
-          <Text
-            style={styles.dateHelp}
-          >
-            Use YYYY-MM-DD
-          </Text>
+          <View style={styles.datePicker}>
+            <DateTimePicker
+              value={
+                isValidDate(dateEaten)
+                  ? new Date(`${dateEaten}T12:00:00`)
+                  : new Date()
+              }
+              mode="date"
+              display="compact"
+              maximumDate={new Date()}
+              themeVariant="dark"
+              accentColor={Palette.accent}
+              onValueChange={(_event, date) => {
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                setDateEaten(`${date.getFullYear()}-${month}-${day}`);
+              }}
+            />
+          </View>
         </View>
 
         <TouchableOpacity
@@ -702,6 +705,10 @@ export default function EditReviewScreen() {
 }
 
 const styles = StyleSheet.create({
+  datePicker: {
+    alignItems: 'flex-start',
+    marginTop: 4,
+  },
   screen: {
     flex: 1,
     backgroundColor: Palette.background,
@@ -830,21 +837,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Palette.textMuted,
     marginTop: 2,
-  },
-  dateInput: {
-    borderWidth: 1,
-    borderColor: Palette.borderStrong,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    fontSize: 16,
-    color: Palette.text,
-    backgroundColor: Palette.background,
-  },
-  dateHelp: {
-    fontSize: 12,
-    color: Palette.textMuted,
-    marginTop: 6,
   },
   saveButton: {
     backgroundColor: Palette.accent,

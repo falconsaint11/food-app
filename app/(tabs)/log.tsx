@@ -2,6 +2,7 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 
 import * as Location from "expo-location";
 
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -139,6 +140,13 @@ async function countMenuDishes(locationIds: string[]) {
   return new Set((data ?? []).map((dish) => dish.name_key)).size;
 }
 
+// "2026-11-07" in the phone's time zone, the format of reviews.date_eaten.
+function toDateKey(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
 function plural(count: number, word: string) {
   return `${count} ${word}${count === 1 ? "" : "es"}`;
 }
@@ -214,6 +222,9 @@ export default function LogScreen() {
   const [restaurantRating, setRestaurantRating] = useState(0);
 
   const [restaurantNotes, setRestaurantNotes] = useState("");
+
+  // When the meal was, for logging past visits. Today by default.
+  const [dateEaten, setDateEaten] = useState(() => new Date());
 
   const [friends, setFriends] = useState<TaggableFriend[]>([]);
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
@@ -975,6 +986,17 @@ export default function LogScreen() {
         restaurant_id: restaurantId,
         rating: restaurantRating > 0 ? restaurantRating : null,
         notes: restaurantNotes.trim() || null,
+        // A past visit is dated at noon that day; today's is right now.
+        ...(toDateKey(dateEaten) !== toDateKey(new Date())
+          ? {
+              visited_at: new Date(
+                dateEaten.getFullYear(),
+                dateEaten.getMonth(),
+                dateEaten.getDate(),
+                12,
+              ).toISOString(),
+            }
+          : {}),
       })
       .select("id")
       .single();
@@ -1030,6 +1052,7 @@ export default function LogScreen() {
         rating: dish.rating,
         review_text: dish.notes.trim() || null,
         photo_path: photoPath,
+        date_eaten: toDateKey(dateEaten),
       })
       .select("id")
       .single();
@@ -1244,6 +1267,8 @@ export default function LogScreen() {
     setRestaurantRating(0);
 
     setRestaurantNotes("");
+
+    setDateEaten(new Date());
 
     setSelectedFriends([]);
 
@@ -1630,6 +1655,27 @@ export default function LogScreen() {
           </>
         )}
 
+        <View style={styles.dateRow}>
+          <Text style={[styles.label, styles.dateLabel]}>When?</Text>
+
+          <View style={styles.dateValue}>
+            {toDateKey(dateEaten) === toDateKey(new Date()) ? (
+              <Text style={styles.todayText}>Today</Text>
+            ) : null}
+
+            <DateTimePicker
+              value={dateEaten}
+              mode="date"
+              display="compact"
+              maximumDate={new Date()}
+              themeVariant="dark"
+              accentColor={Palette.accent}
+              onValueChange={(_event, date) => setDateEaten(date)}
+              disabled={loading}
+            />
+          </View>
+        </View>
+
         <Text style={[styles.label, styles.sectionLabel]}>
           What did you eat?
         </Text>
@@ -1803,6 +1849,28 @@ const styles = StyleSheet.create({
     fontWeight: "600",
 
     marginBottom: 6,
+  },
+
+  dateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 18,
+  },
+
+  dateLabel: {
+    fontSize: 16,
+  },
+
+  dateValue: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+
+  todayText: {
+    fontSize: 14,
+    color: Palette.textMuted,
   },
 
   sectionLabel: {

@@ -15,9 +15,16 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { fetchCoverPhotos } from '@/components/cover-photos';
 import { PhotoCard, PhotoCardRow } from '@/components/photo-card-row';
 import { MapRestaurant, RestaurantMap } from '@/components/restaurant-map';
 import { Palette } from '@/constants/theme';
+import {
+  createSessionToken,
+  findOrCreateGoogleRestaurant,
+  GooglePlaceSuggestion,
+  searchGoogleFoodPlaces,
+} from '@/lib/google-places';
 import { withoutHiddenUsers } from '@/lib/moderation';
 import { supabase } from '@/lib/supabase';
 import { fetchTags, Tag } from '@/lib/tags';
@@ -36,6 +43,7 @@ type RestaurantResult = {
   name: string;
   city: string | null;
   state: string | null;
+  google_place_id: string | null;
 };
 
 type DishResult = {
@@ -98,9 +106,11 @@ type FriendReview = {
   rating: number;
   photo_path: string | null;
   user_id: string;
+  dish_id: string;
   profiles: { username: string; display_name: string | null } | null;
   dishes: {
     name: string;
+    cover_review_id: string | null;
     restaurants: { name: string; brands: { name: string } | null } | null;
   } | null;
 };
@@ -291,6 +301,15 @@ export default function DiscoverScreen() {
   const [restaurantResults, setRestaurantResults] = useState<RestaurantResult[]>([]);
   const [dishResults, setDishResults] = useState<DishResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  // Food places on Google that aren't on Wotri yet; tapping one adds it and
+  // opens its page.
+  const [googlePlaces, setGooglePlaces] = useState<GooglePlaceSuggestion[]>([]);
+  const [googleSearching, setGoogleSearching] = useState(false);
+  const [openingPlaceId, setOpeningPlaceId] = useState<string | null>(null);
+  const googleTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const googleSession = useRef<string | null>(null);
+  // Bumped by each search, so slow, older results never replace newer ones.
+  const searchVersion = useRef(0);
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [followingIds, setFollowingIds] = useState<string[]>([]);
@@ -406,8 +425,9 @@ export default function DiscoverScreen() {
         rating,
         photo_path,
         user_id,
+        dish_id,
         profiles:user_id (username, display_name),
-        dishes (name, restaurants (name, brands (name)))
+        dishes (name, cover_review_id, restaurants (name, brands (name)))
       `)
       .in('user_id', ids)
       .order('created_at', { ascending: false })
@@ -418,9 +438,11 @@ export default function DiscoverScreen() {
       return;
     }
 
-    const visible = await withoutHiddenUsers(
-      (data ?? []) as unknown as FriendReview[],
-      (review) => review.user_id
+    const visible = await withDishPhotos(
+      await withoutHiddenUsers(
+        (data ?? []) as unknown as FriendReview[],
+        (review) => review.user_id
+      )
     );
 
     // Reviews with photos first; it's a photo row.
@@ -445,9 +467,10 @@ export default function DiscoverScreen() {
         rating,
         photo_path,
         user_id,
+        dish_id,
         created_at,
         profiles:user_id (username, display_name),
-        dishes (name, restaurants (name, brands (name))),
+        dishes (name, cover_review_id, restaurants (name, brands (name))),
         review_reactions (count),
         review_comments (count)
       `)
@@ -469,15 +492,47 @@ export default function DiscoverScreen() {
       (review.review_reactions[0]?.count ?? 0) +
       2 * (review.review_comments[0]?.count ?? 0);
 
+    // The most popular few get their dish's photo if they have none.
     // Sorting is stable, so ties stay newest first.
+    const top = await withDishPhotos(
+      [...visible].sort((a, b) => score(b) - score(a)).slice(0, ROW_COUNT * 2)
+    );
+
     setPopularReviews(
-      [...visible]
+      top
         .sort(
           (a, b) =>
             Number(Boolean(b.photo_path)) - Number(Boolean(a.photo_path)) ||
             score(b) - score(a)
         )
         .slice(0, ROW_COUNT)
+    );
+  }
+
+  // A review without a photo shows its dish's photo instead: the pinned
+  // cover, or the best one (the cover_photos() pick, which favors likes).
+  async function withDishPhotos<T extends FriendReview>(reviews: T[]) {
+    const pinnedByDish = new Map<string, string | null>();
+
+    for (const review of reviews) {
+      if (!review.photo_path && review.dish_id) {
+        pinnedByDish.set(review.dish_id, review.dishes?.cover_review_id ?? null);
+      }
+    }
+
+    const photoByDish = new Map<string, string>();
+
+    await Promise.all(
+      [...pinnedByDish].map(async ([dishId, pinnedReviewId]) => {
+        const [cover] = await fetchCoverPhotos([dishId], pinnedReviewId);
+        if (cover) photoByDish.set(dishId, cover.photo_path);
+      })
+    );
+
+    return reviews.map((review) =>
+      review.photo_path || !photoByDish.has(review.dish_id)
+        ? review
+        : { ...review, photo_path: photoByDish.get(review.dish_id)! }
     );
   }
 
@@ -844,6 +899,11 @@ export default function DiscoverScreen() {
   async function runSearch(searchText: string, type: SearchType) {
     setSearchLoading(true);
     const pattern = containsPattern(searchText);
+    const version = ++searchVersion.current;
+
+    if (googleTimeout.current) clearTimeout(googleTimeout.current);
+    setGooglePlaces([]);
+    setGoogleSearching(false);
 
     if (type === 'users') {
       const { data, error } = await supabase
@@ -864,13 +924,23 @@ export default function DiscoverScreen() {
     }
 
     if (type === 'restaurants') {
+      if (searchText.length >= 3) {
+        setGoogleSearching(true);
+        googleTimeout.current = setTimeout(
+          () => searchGoogle(searchText, version),
+          350
+        );
+      }
+
       const { data, error } = await supabase
         .from('restaurants')
-        .select('id, name, city, state')
+        .select('id, name, city, state, google_place_id')
         .or(
           `name.ilike.${pattern},city.ilike.${pattern},state.ilike.${pattern}`
         )
         .limit(20);
+
+      if (version !== searchVersion.current) return;
 
       setSearchLoading(false);
 
@@ -897,6 +967,45 @@ export default function DiscoverScreen() {
     }
 
     setDishResults((data ?? []) as unknown as DishResult[]);
+  }
+
+  async function searchGoogle(searchText: string, version: number) {
+    if (!googleSession.current) googleSession.current = createSessionToken();
+
+    try {
+      const places = await searchGoogleFoodPlaces(
+        searchText,
+        googleSession.current,
+        userLocation
+      );
+      if (version === searchVersion.current) setGooglePlaces(places);
+    } catch (error) {
+      console.log('Google restaurant search error:', error);
+    } finally {
+      if (version === searchVersion.current) setGoogleSearching(false);
+    }
+  }
+
+  async function openGooglePlace(placeId: string) {
+    if (openingPlaceId) return;
+
+    setOpeningPlaceId(placeId);
+
+    try {
+      const restaurantId = await findOrCreateGoogleRestaurant(
+        placeId,
+        googleSession.current ?? createSessionToken()
+      );
+      googleSession.current = null;
+      router.push({ pathname: '/restaurant/[id]', params: { id: restaurantId } });
+    } catch (error) {
+      Alert.alert(
+        'Restaurant error',
+        error instanceof Error ? error.message : 'Could not open this restaurant.'
+      );
+    } finally {
+      setOpeningPlaceId(null);
+    }
   }
 
   function handleSearch(text: string) {
@@ -1063,6 +1172,29 @@ export default function DiscoverScreen() {
     );
   }
 
+  function renderRestaurantResult(restaurant: RestaurantResult) {
+    return (
+      <TouchableOpacity
+        key={restaurant.id}
+        style={styles.resultRow}
+        onPress={() => openRestaurant(restaurant.id)}
+      >
+        <View style={styles.resultIcon}>
+          <Text style={styles.resultEmoji}>🍽️</Text>
+        </View>
+        <View style={styles.resultText}>
+          <Text style={styles.primaryText}>{restaurant.name}</Text>
+          {locationText(restaurant.city, restaurant.state) ? (
+            <Text style={styles.secondaryText}>
+              {locationText(restaurant.city, restaurant.state)}
+            </Text>
+          ) : null}
+        </View>
+        <Text style={styles.chevron}>›</Text>
+      </TouchableOpacity>
+    );
+  }
+
   function renderSearchResults() {
     if (searchLoading) {
       return <ActivityIndicator style={styles.loading} color={Palette.accent} />;
@@ -1132,30 +1264,67 @@ export default function DiscoverScreen() {
     }
 
     if (searchType === 'restaurants') {
-      if (restaurantResults.length === 0) {
+      const onWotri = new Set(
+        restaurantResults.map((restaurant) => restaurant.google_place_id)
+      );
+      const newPlaces = googlePlaces.filter(
+        (place) =>
+          place.placePrediction?.placeId &&
+          !onWotri.has(place.placePrediction.placeId)
+      );
+
+      if (
+        restaurantResults.length === 0 &&
+        newPlaces.length === 0 &&
+        !googleSearching
+      ) {
         return <Text style={styles.noResults}>No restaurants found.</Text>;
       }
 
-      return restaurantResults.map((restaurant) => (
-        <TouchableOpacity
-          key={restaurant.id}
-          style={styles.resultRow}
-          onPress={() => openRestaurant(restaurant.id)}
-        >
-          <View style={styles.resultIcon}>
-            <Text style={styles.resultEmoji}>🍽️</Text>
-          </View>
-          <View style={styles.resultText}>
-            <Text style={styles.primaryText}>{restaurant.name}</Text>
-            {locationText(restaurant.city, restaurant.state) ? (
-              <Text style={styles.secondaryText}>
-                {locationText(restaurant.city, restaurant.state)}
-              </Text>
-            ) : null}
-          </View>
-          <Text style={styles.chevron}>›</Text>
-        </TouchableOpacity>
-      ));
+      return (
+        <>
+          {restaurantResults.map((restaurant) => renderRestaurantResult(restaurant))}
+
+          {newPlaces.map((place) => {
+            const prediction = place.placePrediction!;
+            const placeId = prediction.placeId!;
+
+            return (
+              <TouchableOpacity
+                key={placeId}
+                style={styles.resultRow}
+                onPress={() => openGooglePlace(placeId)}
+                disabled={openingPlaceId !== null}
+              >
+                <View style={styles.resultIcon}>
+                  <Text style={styles.resultEmoji}>📍</Text>
+                </View>
+                <View style={styles.resultText}>
+                  <Text style={styles.primaryText}>
+                    {prediction.structuredFormat?.mainText?.text ??
+                      prediction.text?.text ??
+                      'Restaurant'}
+                  </Text>
+                  {prediction.structuredFormat?.secondaryText?.text ? (
+                    <Text style={styles.secondaryText} numberOfLines={1}>
+                      {prediction.structuredFormat.secondaryText.text}
+                    </Text>
+                  ) : null}
+                </View>
+                {openingPlaceId === placeId ? (
+                  <ActivityIndicator color={Palette.accent} />
+                ) : (
+                  <Text style={styles.chevron}>›</Text>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+
+          {googleSearching ? (
+            <ActivityIndicator style={styles.loading} color={Palette.accent} />
+          ) : null}
+        </>
+      );
     }
 
     if (dishResults.length === 0) {

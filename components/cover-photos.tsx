@@ -6,7 +6,6 @@ import {
   NativeSyntheticEvent,
   ScrollView,
   StyleSheet,
-  Text,
   TouchableOpacity,
   useWindowDimensions,
   View,
@@ -49,23 +48,15 @@ export async function fetchCoverPhotos(
 
 type CoverPhotosProps = {
   photos: CoverPhoto[];
-  title: string;
 };
 
-export function CoverPhotos({ photos, title }: CoverPhotosProps) {
+export function CoverPhotos({ photos }: CoverPhotosProps) {
   const { width } = useWindowDimensions();
   const [activeIndex, setActiveIndex] = useState(0);
 
+  // No photos yet: no cover at all, just the page's text.
   if (photos.length === 0) {
-    return (
-      <View style={styles.fallback}>
-        <View style={styles.fallbackGlow} />
-
-        <Text style={styles.fallbackInitial}>
-          {title.trim().charAt(0).toUpperCase()}
-        </Text>
-      </View>
-    );
+    return null;
   }
 
   function handleScrollEnd(event: NativeSyntheticEvent<NativeScrollEvent>) {
@@ -123,30 +114,6 @@ export function CoverPhotos({ photos, title }: CoverPhotosProps) {
 }
 
 const styles = StyleSheet.create({
-  fallback: {
-    width: '100%',
-    height: COVER_HEIGHT,
-    backgroundColor: '#2A1A14',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  fallbackGlow: {
-    position: 'absolute',
-    width: 360,
-    height: 360,
-    borderRadius: 180,
-    top: -150,
-    right: -110,
-    backgroundColor: Palette.accent,
-    opacity: 0.35,
-  },
-  fallbackInitial: {
-    color: Palette.text,
-    fontSize: 84,
-    fontWeight: '800',
-    opacity: 0.9,
-  },
   dots: {
     position: 'absolute',
     bottom: 12,

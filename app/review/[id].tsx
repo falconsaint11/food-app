@@ -1,6 +1,6 @@
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import {
   ActivityIndicator,
@@ -13,6 +13,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  type TextInputInstance,
   View,
 } from "react-native";
 
@@ -81,6 +82,9 @@ type Comment = {
 
   user_id: string;
 
+  // The top-level comment this replies to; replies are one level deep.
+  parent_id: string | null;
+
   comment_text: string;
 
   created_at: string;
@@ -92,7 +96,22 @@ type Comment = {
   } | null;
 };
 
-const reactions: ReactionType[] = ["😂", "🔥", "🤤", "❤️"];
+type CommentLike = {
+  comment_id: string;
+  user_id: string;
+};
+
+const COMMENT_SELECT = `
+  id,
+  user_id,
+  parent_id,
+  comment_text,
+  created_at,
+  profiles:user_id (
+    username,
+    display_name
+  )
+`;
 
 export default function ReviewDetailScreen() {
   const isPremium = useIsPremium();
@@ -119,6 +138,13 @@ export default function ReviewDetailScreen() {
   const [commentText, setCommentText] = useState("");
 
   const [commentSaving, setCommentSaving] = useState(false);
+
+  const [commentLikes, setCommentLikes] = useState<CommentLike[]>([]);
+
+  // The comment being replied to, if any.
+  const [replyTo, setReplyTo] = useState<Comment | null>(null);
+
+  const commentInput = useRef<TextInputInstance>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -282,60 +308,40 @@ export default function ReviewDetailScreen() {
       setMyReaction(null);
     }
 
-    const {
-      data: commentData,
-
-      error: commentError,
-    } = await supabase
-
+    const { data: commentData, error: commentError } = await supabase
       .from("review_comments")
-
-      .select(
-        `
-
-        id,
-
-        user_id,
-
-        comment_text,
-
-        created_at,
-
-        profiles:user_id (
-
-          username,
-
-          display_name
-
-        )
-
-      `,
-      )
-
+      .select(COMMENT_SELECT)
       .eq("review_id", id)
-
-      .order("created_at", {
-        ascending: true,
-      });
-
-    setLoading(false);
+      .order("created_at", { ascending: true });
 
     if (commentError) {
-      Alert.alert(
-        "Comment error",
-
-        commentError.message,
-      );
-
+      setLoading(false);
+      Alert.alert("Comment error", commentError.message);
       return;
     }
 
-    setComments(
-      await withoutHiddenUsers(
-        (commentData ?? []) as unknown as Comment[],
-        (comment) => comment.user_id,
-      ),
+    const visibleComments = await withoutHiddenUsers(
+      (commentData ?? []) as unknown as Comment[],
+      (comment) => comment.user_id,
     );
+
+    setComments(visibleComments);
+
+    const commentIds = visibleComments.map((comment) => comment.id);
+
+    const { data: likeData, error: likeError } =
+      commentIds.length > 0
+        ? await supabase
+            .from("review_comment_likes")
+            .select("comment_id, user_id")
+            .in("comment_id", commentIds)
+        : { data: [], error: null };
+
+    if (likeError) console.log("Comment likes error:", likeError.message);
+
+    setCommentLikes((likeData ?? []) as CommentLike[]);
+
+    setLoading(false);
   }
 
   async function deleteReview() {
@@ -414,130 +420,81 @@ export default function ReviewDetailScreen() {
     );
   }
 
-  async function toggleReaction(reaction: ReactionType) {
+  // One kind of reaction now: a like. Older emoji reactions count as likes.
+  async function toggleLike() {
     if (!id || !currentUserId || reactionSaving) {
       return;
     }
 
     setReactionSaving(true);
 
-    if (myReaction === reaction) {
-      const { error } = await supabase
-
-        .from("review_reactions")
-
-        .delete()
-
-        .eq("review_id", id)
-
-        .eq(
-          "user_id",
-
-          currentUserId,
-        );
-
-      setReactionSaving(false);
-
-      if (error) {
-        Alert.alert(
-          "Reaction error",
-
-          error.message,
-        );
-
-        return;
-      }
-
-      setReactionRows((current) =>
-        current.filter((row) => row.user_id !== currentUserId),
-      );
-
-      setMyReaction(null);
-
-      return;
-    }
-
-    if (myReaction) {
-      const { error } = await supabase
-
-        .from("review_reactions")
-
-        .update({
-          reaction,
-        })
-
-        .eq("review_id", id)
-
-        .eq(
-          "user_id",
-
-          currentUserId,
-        );
-
-      setReactionSaving(false);
-
-      if (error) {
-        Alert.alert(
-          "Reaction error",
-
-          error.message,
-        );
-
-        return;
-      }
-
-      setReactionRows((current) =>
-        current.map((row) =>
-          row.user_id === currentUserId
-            ? {
-                ...row,
-
-                reaction,
-              }
-            : row,
-        ),
-      );
-
-      setMyReaction(reaction);
-
-      return;
-    }
-
-    const { error } = await supabase
-
-      .from("review_reactions")
-
-      .insert({
-        review_id: id,
-
-        user_id: currentUserId,
-
-        reaction,
-      });
+    const { error } = myReaction
+      ? await supabase
+          .from("review_reactions")
+          .delete()
+          .eq("review_id", id)
+          .eq("user_id", currentUserId)
+      : await supabase.from("review_reactions").insert({
+          review_id: id,
+          user_id: currentUserId,
+          reaction: "❤️",
+        });
 
     setReactionSaving(false);
 
     if (error) {
-      Alert.alert(
-        "Reaction error",
-
-        error.message,
-      );
-
+      Alert.alert("Like error", error.message);
       return;
     }
 
-    setReactionRows((current) => [
-      ...current,
+    setReactionRows((current) =>
+      myReaction
+        ? current.filter((row) => row.user_id !== currentUserId)
+        : [...current, { user_id: currentUserId, reaction: "❤️" }],
+    );
 
-      {
-        user_id: currentUserId,
+    setMyReaction(myReaction ? null : "❤️");
+  }
 
-        reaction,
-      },
-    ]);
+  async function toggleCommentLike(comment: Comment) {
+    if (!currentUserId) return;
 
-    setMyReaction(reaction);
+    const liked = commentLikes.some(
+      (like) =>
+        like.comment_id === comment.id && like.user_id === currentUserId,
+    );
+
+    const { error } = liked
+      ? await supabase
+          .from("review_comment_likes")
+          .delete()
+          .eq("comment_id", comment.id)
+          .eq("user_id", currentUserId)
+      : await supabase
+          .from("review_comment_likes")
+          .insert({ comment_id: comment.id, user_id: currentUserId });
+
+    if (error) {
+      Alert.alert("Like error", error.message);
+      return;
+    }
+
+    setCommentLikes((current) =>
+      liked
+        ? current.filter(
+            (like) =>
+              !(
+                like.comment_id === comment.id &&
+                like.user_id === currentUserId
+              ),
+          )
+        : [...current, { comment_id: comment.id, user_id: currentUserId }],
+    );
+  }
+
+  function startReply(comment: Comment) {
+    setReplyTo(comment);
+    commentInput.current?.focus();
   }
 
   async function postComment() {
@@ -560,56 +517,29 @@ export default function ReviewDetailScreen() {
     setCommentSaving(true);
 
     const { data, error } = await supabase
-
       .from("review_comments")
-
       .insert({
         review_id: id,
-
         user_id: currentUserId,
-
         comment_text: trimmedComment,
+        // Replies to a reply go under the same top-level comment.
+        parent_id: replyTo ? (replyTo.parent_id ?? replyTo.id) : null,
       })
-
-      .select(
-        `
-
-          id,
-
-          user_id,
-
-          comment_text,
-
-          created_at,
-
-          profiles:user_id (
-
-            username,
-
-            display_name
-
-          )
-
-        `,
-      )
-
+      .select(COMMENT_SELECT)
       .single();
 
     setCommentSaving(false);
 
     if (error) {
-      Alert.alert(
-        "Comment error",
-
-        error.message,
-      );
-
+      Alert.alert("Comment error", error.message);
       return;
     }
 
     setComments((current) => [...current, data as unknown as Comment]);
 
     setCommentText("");
+
+    setReplyTo(null);
   }
 
   async function deleteComment(commentId: string) {
@@ -631,8 +561,12 @@ export default function ReviewDetailScreen() {
       return;
     }
 
+    // Its replies are deleted with it.
     setComments((current) =>
-      current.filter((comment) => comment.id !== commentId),
+      current.filter(
+        (comment) =>
+          comment.id !== commentId && comment.parent_id !== commentId,
+      ),
     );
   }
 
@@ -640,7 +574,7 @@ export default function ReviewDetailScreen() {
     Alert.alert(
       "Delete comment?",
 
-      "This comment will be permanently removed.",
+      "This comment and any replies to it will be permanently removed.",
 
       [
         {
@@ -658,10 +592,6 @@ export default function ReviewDetailScreen() {
         },
       ],
     );
-  }
-
-  function getReactionCount(reaction: ReactionType) {
-    return reactionRows.filter((row) => row.reaction === reaction).length;
   }
 
   function formatDate(date: string) {
@@ -719,6 +649,106 @@ export default function ReviewDetailScreen() {
   }
 
   const isOwnReview = review.user_id === currentUserId;
+
+  // Replies show under their comment, so a reply whose comment is hidden
+  // (e.g. its author is blocked) isn't shown.
+  const topLevelComments = comments.filter((comment) => !comment.parent_id);
+
+  function renderComment(comment: Comment, isReply: boolean) {
+    const isOwnComment = comment.user_id === currentUserId;
+    const likes = commentLikes.filter(
+      (like) => like.comment_id === comment.id,
+    );
+    const liked = likes.some((like) => like.user_id === currentUserId);
+    const name =
+      comment.profiles?.display_name || comment.profiles?.username || "User";
+
+    return (
+      <View
+        key={comment.id}
+        style={[styles.comment, isReply && styles.reply]}
+      >
+        <TouchableOpacity
+          onPress={() => {
+            if (isOwnComment) {
+              router.push("/profile");
+            } else {
+              router.push(`/user/${comment.user_id}`);
+            }
+          }}
+        >
+          <View style={styles.commentAvatar}>
+            <Text style={styles.commentAvatarText}>
+              {name.charAt(0).toUpperCase()}
+            </Text>
+          </View>
+        </TouchableOpacity>
+
+        <View style={styles.commentBody}>
+          <Text style={styles.commentText}>
+            <Text
+              style={styles.commentName}
+              onPress={() => {
+                if (isOwnComment) {
+                  router.push("/profile");
+                } else {
+                  router.push(`/user/${comment.user_id}`);
+                }
+              }}
+            >
+              {comment.profiles?.username ?? "user"}
+            </Text>{" "}
+            {comment.comment_text}
+          </Text>
+
+          <View style={styles.commentFooter}>
+            <Text style={styles.commentDate}>
+              {formatCommentDate(comment.created_at)}
+            </Text>
+
+            <TouchableOpacity onPress={() => startReply(comment)}>
+              <Text style={styles.commentAction}>Reply</Text>
+            </TouchableOpacity>
+
+            {isOwnComment ? (
+              <TouchableOpacity
+                onPress={() => confirmDeleteComment(comment.id)}
+              >
+                <Text style={styles.commentAction}>Delete</Text>
+              </TouchableOpacity>
+            ) : (
+              <ContentMenu
+                targetType="comment"
+                targetId={String(comment.id)}
+                authorId={comment.user_id}
+                authorName={name}
+                onBlocked={() =>
+                  setComments((current) =>
+                    current.filter(
+                      (other) => other.user_id !== comment.user_id,
+                    ),
+                  )
+                }
+              />
+            )}
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={styles.commentLike}
+          onPress={() => toggleCommentLike(comment)}
+          accessibilityLabel={liked ? "Unlike comment" : "Like comment"}
+        >
+          <Text style={[styles.commentHeart, liked && styles.heartOn]}>
+            {liked ? "♥" : "♡"}
+          </Text>
+          {likes.length > 0 ? (
+            <Text style={styles.commentLikeCount}>{likes.length}</Text>
+          ) : null}
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   const photoUrl = review.photo_path ? getPhotoUrl(review.photo_path) : null;
 
@@ -784,7 +814,7 @@ export default function ReviewDetailScreen() {
           />
         </View>
 
-        <View style={styles.reviewCard}>
+        <View>
           <View style={styles.foodRow}>
             <View style={styles.foodInfo}>
               {review.dishes ? (
@@ -873,76 +903,90 @@ export default function ReviewDetailScreen() {
             </View>
           ) : null}
 
-          <Text style={styles.date}>Eaten {formatDate(review.date_eaten)}</Text>
+          <View style={styles.dateRow}>
+            <Text style={styles.date}>Eaten {formatDate(review.date_eaten)}</Text>
+
+            {isOwnReview ? (
+              <View style={styles.ownerActions}>
+                <TouchableOpacity
+                  onPress={() =>
+                    router.push({
+                      pathname: "/review/edit/[id]",
+                      params: { id: review.id },
+                    })
+                  }
+                >
+                  <Text style={styles.ownerAction}>Edit</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={confirmDeleteReview}
+                  disabled={deletingReview}
+                >
+                  <Text style={[styles.ownerAction, styles.deleteAction]}>
+                    {deletingReview ? "Deleting…" : "Delete"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </View>
         </View>
 
-        {isOwnReview ? (
-          <View style={styles.ownerActions}>
-            <TouchableOpacity
-              style={styles.editButton}
-              onPress={() =>
-                router.push({
-                  pathname: "/review/edit/[id]",
+        <View style={styles.likeBar}>
+          <TouchableOpacity
+            style={styles.likeButton}
+            onPress={toggleLike}
+            disabled={reactionSaving}
+            accessibilityLabel={myReaction ? "Unlike" : "Like"}
+          >
+            <Text style={[styles.heart, myReaction && styles.heartOn]}>
+              {myReaction ? "♥" : "♡"}
+            </Text>
+            <Text style={styles.likeCount}>
+              {reactionRows.length === 0
+                ? "Like"
+                : `${reactionRows.length} ${reactionRows.length === 1 ? "like" : "likes"}`}
+            </Text>
+          </TouchableOpacity>
 
-                  params: {
-                    id: review.id,
-                  },
-                })
-              }
-            >
-              <Text style={styles.editButtonText}>Edit Review</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.deleteReviewButton}
-              onPress={confirmDeleteReview}
-              disabled={deletingReview}
-            >
-              <Text style={styles.deleteReviewButtonText}>
-                {deletingReview ? "Deleting..." : "Delete Review"}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-
-        <View style={styles.reactionSection}>
-          <Text style={styles.reactionTitle}>React</Text>
-
-          <View style={styles.reactionRow}>
-            {reactions.map((reaction) => {
-              const selected = myReaction === reaction;
-
-              const count = getReactionCount(reaction);
-
-              return (
-                <TouchableOpacity
-                  key={reaction}
-                  style={[
-                    styles.reactionButton,
-
-                    selected && styles.reactionButtonSelected,
-                  ]}
-                  onPress={() => toggleReaction(reaction)}
-                  disabled={reactionSaving}
-                >
-                  <Text style={styles.reactionEmoji}>{reaction}</Text>
-
-                  {count > 0 ? (
-                    <Text style={styles.reactionCount}>{count}</Text>
-                  ) : null}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+          <Text style={styles.likeCount}>
+            {comments.length === 1 ? "1 comment" : `${comments.length} comments`}
+          </Text>
         </View>
 
         <View style={styles.commentsSection}>
-          <Text style={styles.commentsTitle}>Comments</Text>
+          {comments.length === 0 ? (
+            <Text style={styles.noComments}>
+              No comments yet. Be the first.
+            </Text>
+          ) : (
+            topLevelComments.map((comment) => (
+              <View key={comment.id} style={styles.commentThread}>
+                {renderComment(comment, false)}
+
+                {comments
+                  .filter((reply) => reply.parent_id === comment.id)
+                  .map((reply) => renderComment(reply, true))}
+              </View>
+            ))
+          )}
+
+          {replyTo ? (
+            <View style={styles.replyingRow}>
+              <Text style={styles.replyingText}>
+                Replying to @{replyTo.profiles?.username ?? "user"}
+              </Text>
+              <TouchableOpacity onPress={() => setReplyTo(null)}>
+                <Text style={styles.replyingCancel}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
 
           <View style={styles.commentInputRow}>
             <TextInput
+              ref={commentInput}
               style={styles.commentInput}
-              placeholder="Add a comment..."
+              placeholder={replyTo ? "Write a reply..." : "Add a comment..."}
               placeholderTextColor={Palette.textMuted}
               value={commentText}
               onChangeText={setCommentText}
@@ -953,7 +997,6 @@ export default function ReviewDetailScreen() {
             <TouchableOpacity
               style={[
                 styles.postButton,
-
                 (!commentText.trim() || commentSaving) &&
                   styles.postButtonDisabled,
               ]}
@@ -965,91 +1008,6 @@ export default function ReviewDetailScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-
-          {comments.length === 0 ? (
-            <Text style={styles.noComments}>
-              No comments yet. Be the first.
-            </Text>
-          ) : (
-            comments.map((comment) => {
-              const isOwnComment = comment.user_id === currentUserId;
-
-              return (
-                <View key={comment.id} style={styles.commentCard}>
-                  <View style={styles.commentTopRow}>
-                    <TouchableOpacity
-                      style={styles.commentUserArea}
-                      onPress={() => {
-                        if (isOwnComment) {
-                          router.push("/profile");
-                        } else {
-                          router.push(`/user/${comment.user_id}`);
-                        }
-                      }}
-                    >
-                      <View style={styles.commentAvatar}>
-                        <Text style={styles.commentAvatarText}>
-                          {(
-                            comment.profiles?.display_name ||
-                            comment.profiles?.username ||
-                            "U"
-                          )
-
-                            .charAt(0)
-
-                            .toUpperCase()}
-                        </Text>
-                      </View>
-
-                      <View>
-                        <Text style={styles.commentName}>
-                          {comment.profiles?.display_name ||
-                            comment.profiles?.username ||
-                            "User"}
-                        </Text>
-
-                        <Text style={styles.commentHandle}>
-                          @{comment.profiles?.username ?? "unknown"}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-
-                    {isOwnComment ? (
-                      <TouchableOpacity
-                        onPress={() => confirmDeleteComment(comment.id)}
-                      >
-                        <Text style={styles.deleteComment}>Delete</Text>
-                      </TouchableOpacity>
-                    ) : (
-                      <ContentMenu
-                        targetType="comment"
-                        targetId={String(comment.id)}
-                        authorId={comment.user_id}
-                        authorName={
-                          comment.profiles?.display_name ||
-                          comment.profiles?.username ||
-                          "this user"
-                        }
-                        onBlocked={() =>
-                          setComments((current) =>
-                            current.filter(
-                              (other) => other.user_id !== comment.user_id,
-                            ),
-                          )
-                        }
-                      />
-                    )}
-                  </View>
-
-                  <Text style={styles.commentText}>{comment.comment_text}</Text>
-
-                  <Text style={styles.commentDate}>
-                    {formatCommentDate(comment.created_at)}
-                  </Text>
-                </View>
-              );
-            })
-          )}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -1149,17 +1107,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
-  reviewCard: {
-    borderWidth: 1,
-
-    borderColor: Palette.border,
-
-    borderRadius: 16,
-
-    padding: 20,
-
-    overflow: "hidden",
-  },
 
   foodRow: {
     flexDirection: "row",
@@ -1268,137 +1215,145 @@ const styles = StyleSheet.create({
     fontSize: 13,
 
     color: Palette.textMuted,
+  },
 
-    marginTop: 24,
+  dateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 20,
   },
 
   ownerActions: {
     flexDirection: "row",
-
-    gap: 10,
-
-    marginTop: 14,
+    gap: 18,
   },
 
-  editButton: {
-    flex: 1,
-
-    borderWidth: 1,
-
-    borderColor: Palette.accent,
-
-    borderRadius: 10,
-
-    paddingVertical: 12,
-
-    alignItems: "center",
-  },
-
-  editButtonText: {
+  ownerAction: {
     fontSize: 14,
-
-    fontWeight: "700",
-
-    color: Palette.text,
+    fontWeight: "600",
+    color: Palette.textSecondary,
   },
 
-  deleteReviewButton: {
-    flex: 1,
-
-    borderWidth: 1,
-
-    borderColor: Palette.borderStrong,
-
-    borderRadius: 10,
-
-    paddingVertical: 12,
-
-    alignItems: "center",
-  },
-
-  deleteReviewButtonText: {
-    fontSize: 14,
-
-    fontWeight: "700",
-
+  deleteAction: {
     color: Palette.danger,
   },
 
-  reactionSection: {
-    marginTop: 24,
-  },
-
-  reactionTitle: {
-    color: Palette.text,
-    fontSize: 18,
-
-    fontWeight: "700",
-
-    marginBottom: 12,
-  },
-
-  reactionRow: {
+  likeBar: {
     flexDirection: "row",
-
-    gap: 10,
-  },
-
-  reactionButton: {
-    flexDirection: "row",
-
     alignItems: "center",
-
-    borderWidth: 1,
-
-    borderColor: Palette.borderStrong,
-
-    borderRadius: 22,
-
-    paddingHorizontal: 13,
-
-    paddingVertical: 9,
-
-    backgroundColor: Palette.background,
+    justifyContent: "space-between",
+    marginTop: 20,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: Palette.border,
   },
 
-  reactionButtonSelected: {
-    backgroundColor: Palette.surface,
-
-    borderColor: Palette.accent,
+  likeButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
 
-  reactionEmoji: {
+  heart: {
+    fontSize: 24,
     color: Palette.text,
-    fontSize: 20,
   },
 
-  reactionCount: {
-    color: Palette.text,
+  heartOn: {
+    color: Palette.danger,
+  },
+
+  likeCount: {
     fontSize: 14,
-
     fontWeight: "600",
-
-    marginLeft: 5,
+    color: Palette.textSecondary,
   },
+
+
+
+
+
+
+
+
+
+
+
+
 
   commentsSection: {
-    marginTop: 30,
-
-    paddingTop: 20,
-
-    borderTopWidth: 1,
-
-    borderTopColor: Palette.border,
+    marginTop: 8,
   },
 
-  commentsTitle: {
-    color: Palette.text,
-    fontSize: 18,
+  commentThread: {
+    paddingVertical: 6,
+  },
 
+  comment: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingVertical: 10,
+  },
+
+  reply: {
+    marginLeft: 44,
+  },
+
+  commentBody: {
+    flex: 1,
+  },
+
+  commentFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+    marginTop: 4,
+  },
+
+  commentAction: {
+    fontSize: 12,
     fontWeight: "700",
-
-    marginBottom: 14,
+    color: Palette.textMuted,
   },
+
+  commentLike: {
+    alignItems: "center",
+    paddingLeft: 12,
+    minWidth: 32,
+  },
+
+  commentHeart: {
+    fontSize: 16,
+    color: Palette.textMuted,
+  },
+
+  commentLikeCount: {
+    fontSize: 11,
+    color: Palette.textMuted,
+    marginTop: 1,
+  },
+
+  replyingRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 12,
+    marginBottom: -2,
+  },
+
+  replyingText: {
+    fontSize: 13,
+    color: Palette.textSecondary,
+  },
+
+  replyingCancel: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: Palette.textMuted,
+  },
+
 
   commentInputRow: {
     flexDirection: "row",
@@ -1406,6 +1361,8 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
 
     gap: 10,
+
+    marginTop: 14,
   },
 
   commentInput: {
@@ -1462,29 +1419,8 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
 
-  commentCard: {
-    paddingVertical: 16,
 
-    borderBottomWidth: 1,
 
-    borderBottomColor: Palette.border,
-  },
-
-  commentTopRow: {
-    flexDirection: "row",
-
-    justifyContent: "space-between",
-
-    alignItems: "center",
-  },
-
-  commentUserArea: {
-    flexDirection: "row",
-
-    alignItems: "center",
-
-    flex: 1,
-  },
 
   commentAvatar: {
     width: 34,
@@ -1516,38 +1452,18 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  commentHandle: {
-    fontSize: 12,
 
-    color: Palette.accent,
-
-    marginTop: 1,
-  },
-
-  deleteComment: {
-    fontSize: 12,
-
-    color: Palette.textMuted,
-
-    fontWeight: "600",
-
-    marginLeft: 12,
-  },
 
   commentText: {
     color: Palette.text,
     fontSize: 15,
 
     lineHeight: 21,
-
-    marginTop: 10,
   },
 
   commentDate: {
     fontSize: 12,
 
     color: Palette.textMuted,
-
-    marginTop: 6,
   },
 });

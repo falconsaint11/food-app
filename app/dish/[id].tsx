@@ -324,7 +324,7 @@ export default function DishDetailScreen() {
       style={styles.screen}
       contentContainerStyle={styles.scrollContent}
     >
-      <CoverPhotos photos={coverPhotos} title={dish.name} />
+      <CoverPhotos photos={coverPhotos} />
 
       <View style={styles.container}>
         <Text style={styles.title}>

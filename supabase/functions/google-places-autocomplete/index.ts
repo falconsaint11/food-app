@@ -13,7 +13,11 @@
 // Deploy:  supabase functions deploy google-places-autocomplete
 // Secret:  supabase secrets set GOOGLE_PLACES_API_KEY=...
 //
-// Request:  { input, latitude?, longitude?, sessionToken? }
+// With foodOnly (Discover's restaurant search, which opens a restaurant
+// page), only food and drink places come back: no gyms, stores or other
+// businesses.
+//
+// Request:  { input, latitude?, longitude?, sessionToken?, foodOnly? }
 // Response: { suggestions: [{ placePrediction: { placeId, text, structuredFormat, types } }] }
 
 const FOOD_PRIMARY_TYPES = [
@@ -106,7 +110,8 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { input, latitude, longitude, sessionToken } = await req.json();
+    const { input, latitude, longitude, sessionToken, foodOnly } =
+      await req.json();
 
     if (typeof input !== "string" || input.trim().length < 3) {
       return json({ suggestions: [] });
@@ -148,7 +153,9 @@ Deno.serve(async (req) => {
     for (const suggestion of [
       ...food,
       ...anything.filter(isFood),
-      ...anything.filter((other) => !isFood(other) && isPlace(other)),
+      ...(foodOnly
+        ? []
+        : anything.filter((other) => !isFood(other) && isPlace(other))),
     ]) {
       const placeId = suggestion.placePrediction!.placeId!;
       if (seen.has(placeId)) continue;

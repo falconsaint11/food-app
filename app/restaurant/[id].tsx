@@ -980,7 +980,7 @@ export default function RestaurantDetailScreen() {
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
     >
-      <CoverPhotos photos={coverPhotos} title={restaurantName} />
+      <CoverPhotos photos={coverPhotos} />
 
       <View style={styles.container}>
         <View style={styles.headerRow}>
@@ -1296,7 +1296,8 @@ export default function RestaurantDetailScreen() {
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Menu</Text>
-                {isCurator ? (
+                {/* Anyone can scan a menu that's just getting started. */}
+                {isCurator || menuEntries.length < 10 ? (
                   <TouchableOpacity
                     onPress={() =>
                       router.push({
@@ -1314,7 +1315,10 @@ export default function RestaurantDetailScreen() {
               </View>
 
               {menuEntries.length === 0 ? (
-                <Text style={styles.emptyText}>No dishes logged yet.</Text>
+                <Text style={styles.emptyText}>
+                  No dishes added yet. Log what you had, or scan the menu to
+                  add it for everyone.
+                </Text>
               ) : (
                 visibleSections.map((section) => (
                   <View key={section.title ?? 'menu'}>

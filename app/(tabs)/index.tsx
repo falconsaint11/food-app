@@ -64,7 +64,6 @@ type FeedEntry =
   | { kind: "dish"; at: string; item: FeedItem }
   | { kind: "restaurant"; at: string; item: RestaurantFeedItem };
 const FEED_SIZE = 30;
-const reactionOrder: ReactionType[] = ["😂", "🔥", "🤤", "❤️"];
 export default function HomeScreen() {
   const isPremium = useIsPremium();
   const [feed, setFeed] = useState<FeedEntry[]>([]);
@@ -314,11 +313,6 @@ export default function HomeScreen() {
   function openReview(reviewId: string) {
     router.push({ pathname: "/review/[id]", params: { id: reviewId } });
   }
-  function getReactionCount(item: FeedItem, reaction: ReactionType) {
-    return (item.review_reactions ?? []).filter(
-      (row) => row.reaction === reaction,
-    ).length;
-  }
   function getPhotoUrl(path: string) {
     const { data } = supabase.storage.from("review-photos").getPublicUrl(path);
     return data.publicUrl;
@@ -555,17 +549,14 @@ export default function HomeScreen() {
                 </View>
               ) : null}
               <View style={styles.engagementRow}>
-                {reactionOrder.map((reaction) => {
-                  const count = getReactionCount(item, reaction);
-                  if (count === 0) return null;
-                  return (
-                    <View key={reaction} style={styles.engagementItem}>
-                      <Text style={styles.engagementText}>
-                        {reaction} {count}
-                      </Text>
-                    </View>
-                  );
-                })}
+                {/* Every reaction counts as a like. */}
+                {(item.review_reactions ?? []).length > 0 ? (
+                  <View style={styles.engagementItem}>
+                    <Text style={styles.engagementText}>
+                      ♥ {(item.review_reactions ?? []).length}
+                    </Text>
+                  </View>
+                ) : null}
                 {commentCount > 0 ? (
                   <Text style={styles.commentCount}>
                     {commentCount} {commentCount === 1 ? "comment" : "comments"}
@@ -573,7 +564,7 @@ export default function HomeScreen() {
                 ) : null}
               </View>
               <TouchableOpacity onPress={() => openReview(item.id)}>
-                <Text style={styles.viewReview}>View reactions & comments</Text>
+                <Text style={styles.viewReview}>View likes & comments</Text>
               </TouchableOpacity>
             </View>
           );
