@@ -1,11 +1,14 @@
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 
-import { useCallback, useRef, useState } from "react";
+import { useHeaderHeight } from "@react-navigation/elements";
+
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   ActivityIndicator,
   Alert,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -16,12 +19,13 @@ import {
   type TextInputInstance,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ContentMenu } from "@/components/content-menu";
-import { CoverPinControls } from "@/components/cover-pin-controls";
+import { useCoverPinActions } from "@/components/cover-pin-controls";
 import { fetchHiddenUserIds, withoutHiddenUsers } from "@/lib/moderation";
 import { formatRating, useIsPremium } from "@/lib/ratings";
-import { dishLabel } from '@/lib/dishes';
+import { dishLabel } from "@/lib/dishes";
 import { supabase } from "@/lib/supabase";
 import { Palette } from "@/constants/theme";
 
@@ -146,6 +150,30 @@ export default function ReviewDetailScreen() {
 
   const commentInput = useRef<TextInputInstance>(null);
 
+  const headerHeight = useHeaderHeight();
+
+  const insets = useSafeAreaInsets();
+
+  const [keyboardShown, setKeyboardShown] = useState(false);
+
+  const pinActions = useCoverPinActions(String(id ?? ""), !!review?.photo_path);
+
+  // The comment bar sits on the keyboard, so it drops the home-bar padding
+  // while typing.
+  useEffect(() => {
+    const show = Keyboard.addListener("keyboardWillShow", () =>
+      setKeyboardShown(true),
+    );
+    const hide = Keyboard.addListener("keyboardWillHide", () =>
+      setKeyboardShown(false),
+    );
+
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       loadReview();
@@ -236,7 +264,10 @@ export default function ReviewDetailScreen() {
     const loadedReview = (data ?? null) as unknown as Review | null;
 
     // A review by someone blocked (either way) isn't shown.
-    if (loadedReview && (await fetchHiddenUserIds()).has(loadedReview.user_id)) {
+    if (
+      loadedReview &&
+      (await fetchHiddenUserIds()).has(loadedReview.user_id)
+    ) {
       setReview(null);
       setLoading(false);
       return;
@@ -397,6 +428,8 @@ export default function ReviewDetailScreen() {
   }
 
   function confirmDeleteReview() {
+    if (deletingReview) return;
+
     Alert.alert(
       "Delete review?",
 
@@ -484,8 +517,7 @@ export default function ReviewDetailScreen() {
         ? current.filter(
             (like) =>
               !(
-                like.comment_id === comment.id &&
-                like.user_id === currentUserId
+                like.comment_id === comment.id && like.user_id === currentUserId
               ),
           )
         : [...current, { comment_id: comment.id, user_id: currentUserId }],
@@ -656,18 +688,13 @@ export default function ReviewDetailScreen() {
 
   function renderComment(comment: Comment, isReply: boolean) {
     const isOwnComment = comment.user_id === currentUserId;
-    const likes = commentLikes.filter(
-      (like) => like.comment_id === comment.id,
-    );
+    const likes = commentLikes.filter((like) => like.comment_id === comment.id);
     const liked = likes.some((like) => like.user_id === currentUserId);
     const name =
       comment.profiles?.display_name || comment.profiles?.username || "User";
 
     return (
-      <View
-        key={comment.id}
-        style={[styles.comment, isReply && styles.reply]}
-      >
+      <View key={comment.id} style={[styles.comment, isReply && styles.reply]}>
         <TouchableOpacity
           onPress={() => {
             if (isOwnComment) {
@@ -710,27 +737,28 @@ export default function ReviewDetailScreen() {
               <Text style={styles.commentAction}>Reply</Text>
             </TouchableOpacity>
 
-            {isOwnComment ? (
-              <TouchableOpacity
-                onPress={() => confirmDeleteComment(comment.id)}
-              >
-                <Text style={styles.commentAction}>Delete</Text>
-              </TouchableOpacity>
-            ) : (
-              <ContentMenu
-                targetType="comment"
-                targetId={String(comment.id)}
-                authorId={comment.user_id}
-                authorName={name}
-                onBlocked={() =>
-                  setComments((current) =>
-                    current.filter(
-                      (other) => other.user_id !== comment.user_id,
-                    ),
-                  )
-                }
-              />
-            )}
+            <ContentMenu
+              targetType="comment"
+              targetId={String(comment.id)}
+              authorId={comment.user_id}
+              authorName={name}
+              onBlocked={() =>
+                setComments((current) =>
+                  current.filter((other) => other.user_id !== comment.user_id),
+                )
+              }
+              actions={
+                isOwnComment
+                  ? [
+                      {
+                        label: "Delete comment",
+                        destructive: true,
+                        onPress: () => confirmDeleteComment(comment.id),
+                      },
+                    ]
+                  : []
+              }
+            />
           </View>
         </View>
 
@@ -756,6 +784,7 @@ export default function ReviewDetailScreen() {
     <KeyboardAvoidingView
       style={styles.screen}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={headerHeight}
     >
       <ScrollView
         contentContainerStyle={styles.container}
@@ -811,6 +840,26 @@ export default function ReviewDetailScreen() {
               "this user"
             }
             onBlocked={() => router.back()}
+            actions={[
+              ...(isOwnReview
+                ? [
+                    {
+                      label: "Edit review",
+                      onPress: () =>
+                        router.push({
+                          pathname: "/review/edit/[id]",
+                          params: { id: review.id },
+                        }),
+                    },
+                    {
+                      label: "Delete review",
+                      destructive: true,
+                      onPress: confirmDeleteReview,
+                    },
+                  ]
+                : []),
+              ...pinActions,
+            ]}
           />
         </View>
 
@@ -829,7 +878,9 @@ export default function ReviewDetailScreen() {
                     })
                   }
                 >
-                  <Text style={styles.dishLink}>{dishLabel(review.dishes)}</Text>
+                  <Text style={styles.dishLink}>
+                    {dishLabel(review.dishes)}
+                  </Text>
                 </TouchableOpacity>
               ) : (
                 <Text style={styles.dishName}>Unknown dish</Text>
@@ -860,20 +911,19 @@ export default function ReviewDetailScreen() {
               )}
             </View>
 
-            <Text style={styles.rating}>{formatRating(review.rating, isPremium)}★</Text>
+            <Text style={styles.rating}>
+              {formatRating(review.rating, isPremium)}★
+            </Text>
           </View>
 
           {photoUrl ? (
-            <>
-              <Image
-                source={{
-                  uri: photoUrl,
-                }}
-                style={styles.reviewPhoto}
-                resizeMode="cover"
-              />
-              <CoverPinControls reviewId={String(review.id)} />
-            </>
+            <Image
+              source={{
+                uri: photoUrl,
+              }}
+              style={styles.reviewPhoto}
+              resizeMode="cover"
+            />
           ) : null}
 
           {review.review_text ? (
@@ -903,33 +953,9 @@ export default function ReviewDetailScreen() {
             </View>
           ) : null}
 
-          <View style={styles.dateRow}>
-            <Text style={styles.date}>Eaten {formatDate(review.date_eaten)}</Text>
-
-            {isOwnReview ? (
-              <View style={styles.ownerActions}>
-                <TouchableOpacity
-                  onPress={() =>
-                    router.push({
-                      pathname: "/review/edit/[id]",
-                      params: { id: review.id },
-                    })
-                  }
-                >
-                  <Text style={styles.ownerAction}>Edit</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={confirmDeleteReview}
-                  disabled={deletingReview}
-                >
-                  <Text style={[styles.ownerAction, styles.deleteAction]}>
-                    {deletingReview ? "Deleting…" : "Delete"}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ) : null}
-          </View>
+          <Text style={[styles.date, styles.dateRow]}>
+            Eaten {formatDate(review.date_eaten)}
+          </Text>
         </View>
 
         <View style={styles.likeBar}>
@@ -950,7 +976,9 @@ export default function ReviewDetailScreen() {
           </TouchableOpacity>
 
           <Text style={styles.likeCount}>
-            {comments.length === 1 ? "1 comment" : `${comments.length} comments`}
+            {comments.length === 1
+              ? "1 comment"
+              : `${comments.length} comments`}
           </Text>
         </View>
 
@@ -970,46 +998,53 @@ export default function ReviewDetailScreen() {
               </View>
             ))
           )}
-
-          {replyTo ? (
-            <View style={styles.replyingRow}>
-              <Text style={styles.replyingText}>
-                Replying to @{replyTo.profiles?.username ?? "user"}
-              </Text>
-              <TouchableOpacity onPress={() => setReplyTo(null)}>
-                <Text style={styles.replyingCancel}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          <View style={styles.commentInputRow}>
-            <TextInput
-              ref={commentInput}
-              style={styles.commentInput}
-              placeholder={replyTo ? "Write a reply..." : "Add a comment..."}
-              placeholderTextColor={Palette.textMuted}
-              value={commentText}
-              onChangeText={setCommentText}
-              multiline
-              maxLength={500}
-            />
-
-            <TouchableOpacity
-              style={[
-                styles.postButton,
-                (!commentText.trim() || commentSaving) &&
-                  styles.postButtonDisabled,
-              ]}
-              onPress={postComment}
-              disabled={!commentText.trim() || commentSaving}
-            >
-              <Text style={styles.postButtonText}>
-                {commentSaving ? "..." : "Post"}
-              </Text>
-            </TouchableOpacity>
-          </View>
         </View>
       </ScrollView>
+
+      <View
+        style={[
+          styles.commentBar,
+          { paddingBottom: keyboardShown ? 10 : Math.max(insets.bottom, 10) },
+        ]}
+      >
+        {replyTo ? (
+          <View style={styles.replyingRow}>
+            <Text style={styles.replyingText}>
+              Replying to @{replyTo.profiles?.username ?? "user"}
+            </Text>
+            <TouchableOpacity onPress={() => setReplyTo(null)}>
+              <Text style={styles.replyingCancel}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        <View style={styles.commentInputRow}>
+          <TextInput
+            ref={commentInput}
+            style={styles.commentInput}
+            placeholder={replyTo ? "Write a reply..." : "Add a comment..."}
+            placeholderTextColor={Palette.textMuted}
+            value={commentText}
+            onChangeText={setCommentText}
+            multiline
+            maxLength={500}
+          />
+
+          <TouchableOpacity
+            style={[
+              styles.postButton,
+              (!commentText.trim() || commentSaving) &&
+                styles.postButtonDisabled,
+            ]}
+            onPress={postComment}
+            disabled={!commentText.trim() || commentSaving}
+          >
+            <Text style={styles.postButtonText}>
+              {commentSaving ? "..." : "Post"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -1106,7 +1141,6 @@ const styles = StyleSheet.create({
 
     marginTop: 2,
   },
-
 
   foodRow: {
     flexDirection: "row",
@@ -1218,25 +1252,15 @@ const styles = StyleSheet.create({
   },
 
   dateRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
     marginTop: 20,
   },
 
-  ownerActions: {
-    flexDirection: "row",
-    gap: 18,
-  },
-
-  ownerAction: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: Palette.textSecondary,
-  },
-
-  deleteAction: {
-    color: Palette.danger,
+  commentBar: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: Palette.border,
+    backgroundColor: Palette.background,
   },
 
   likeBar: {
@@ -1270,18 +1294,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: Palette.textSecondary,
   },
-
-
-
-
-
-
-
-
-
-
-
-
 
   commentsSection: {
     marginTop: 8,
@@ -1339,8 +1351,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginTop: 12,
-    marginBottom: -2,
+    marginBottom: 8,
   },
 
   replyingText: {
@@ -1354,15 +1365,12 @@ const styles = StyleSheet.create({
     color: Palette.textMuted,
   },
 
-
   commentInputRow: {
     flexDirection: "row",
 
     alignItems: "flex-end",
 
     gap: 10,
-
-    marginTop: 14,
   },
 
   commentInput: {
@@ -1419,9 +1427,6 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
 
-
-
-
   commentAvatar: {
     width: 34,
 
@@ -1451,8 +1456,6 @@ const styles = StyleSheet.create({
 
     fontWeight: "700",
   },
-
-
 
   commentText: {
     color: Palette.text,

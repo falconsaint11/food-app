@@ -33,9 +33,9 @@ type Photo = {
 
 type Author = { username: string; display_name: string | null };
 
-// One photo of a restaurant added without a review: who added it, and
-// Report/Block, or Delete for the person who added it (and admins).
-// Curators and admins can pin it as the restaurant's cover.
+// One photo of a restaurant added without a review: who added it, and a "⋯"
+// menu with Report/Block, Delete for the person who added it (and admins),
+// and pinning it as the restaurant's cover for curators and admins.
 export default function RestaurantPhotoScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const isAdmin = useIsAdmin();
@@ -57,7 +57,7 @@ export default function RestaurantPhotoScreen() {
           .from('restaurant_photos')
           .select(
             // Named, since restaurants.cover_photo_id also links the tables.
-            'id, user_id, photo_path, kind, created_at, restaurant_id, restaurants!restaurant_photos_restaurant_id_fkey (name, brand_id, cover_photo_id, brands (name, cover_photo_id))'
+            'id, user_id, photo_path, kind, created_at, restaurant_id, restaurants!restaurant_photos_restaurant_id_fkey (name, brand_id, cover_photo_id, brands (name, cover_photo_id))',
           )
           .eq('id', id)
           .maybeSingle(),
@@ -77,7 +77,7 @@ export default function RestaurantPhotoScreen() {
         Boolean(row) &&
           (place?.brand_id
             ? place.brands?.cover_photo_id
-            : place?.cover_photo_id) === row?.id
+            : place?.cover_photo_id) === row?.id,
       );
 
       if (row) {
@@ -101,14 +101,18 @@ export default function RestaurantPhotoScreen() {
   }, [id]);
 
   function confirmDelete() {
-    Alert.alert('Delete this photo?', 'It will be removed from the restaurant.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: deletePhoto },
-    ]);
+    Alert.alert(
+      'Delete this photo?',
+      'It will be removed from the restaurant.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: deletePhoto },
+      ],
+    );
   }
 
   async function togglePin() {
-    if (!photo) return;
+    if (!photo || pinning) return;
 
     setPinning(true);
 
@@ -176,7 +180,8 @@ export default function RestaurantPhotoScreen() {
     <View style={styles.screen}>
       <Stack.Screen
         options={{
-          title: photo.kind === 'menu' ? `${restaurantName} menu` : restaurantName,
+          title:
+            photo.kind === 'menu' ? `${restaurantName} menu` : restaurantName,
         }}
       />
 
@@ -186,22 +191,6 @@ export default function RestaurantPhotoScreen() {
         contentFit="contain"
         transition={150}
       />
-
-      {isCurator ? (
-        <TouchableOpacity
-          style={[styles.pinButton, pinned && styles.pinButtonOn]}
-          onPress={togglePin}
-          disabled={pinning}
-        >
-          <Text style={styles.pinText}>
-            {pinning
-              ? 'Saving…'
-              : pinned
-                ? '📌 Restaurant cover · Unpin'
-                : '📌 Pin as restaurant cover'}
-          </Text>
-        </TouchableOpacity>
-      ) : null}
 
       <View style={styles.footer}>
         <View style={styles.footerInfo}>
@@ -222,11 +211,7 @@ export default function RestaurantPhotoScreen() {
           </Text>
         </View>
 
-        {isMine || isAdmin ? (
-          <TouchableOpacity onPress={confirmDelete} disabled={deleting}>
-            <Text style={styles.delete}>{deleting ? 'Deleting…' : 'Delete'}</Text>
-          </TouchableOpacity>
-        ) : null}
+        {deleting ? <ActivityIndicator color={Palette.accent} /> : null}
 
         <ContentMenu
           targetType="restaurant_photo"
@@ -234,6 +219,27 @@ export default function RestaurantPhotoScreen() {
           authorId={photo.user_id}
           authorName={authorName}
           onBlocked={() => router.back()}
+          actions={[
+            ...(isCurator
+              ? [
+                  {
+                    label: pinned
+                      ? 'Unpin restaurant cover 📌'
+                      : 'Pin as restaurant cover',
+                    onPress: togglePin,
+                  },
+                ]
+              : []),
+            ...(isMine || isAdmin
+              ? [
+                  {
+                    label: 'Delete photo',
+                    destructive: true,
+                    onPress: confirmDelete,
+                  },
+                ]
+              : []),
+          ]}
         />
       </View>
     </View>
@@ -253,23 +259,6 @@ const styles = StyleSheet.create({
   },
   image: {
     flex: 1,
-  },
-  pinButton: {
-    alignSelf: 'center',
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: Palette.accent,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  pinButtonOn: {
-    backgroundColor: Palette.accent,
-  },
-  pinText: {
-    color: Palette.text,
-    fontSize: 14,
-    fontWeight: '700',
   },
   footer: {
     flexDirection: 'row',
@@ -293,10 +282,5 @@ const styles = StyleSheet.create({
     color: Palette.textMuted,
     fontSize: 13,
     marginTop: 2,
-  },
-  delete: {
-    color: Palette.danger,
-    fontSize: 15,
-    fontWeight: '600',
   },
 });

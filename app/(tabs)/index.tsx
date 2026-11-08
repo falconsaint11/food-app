@@ -41,6 +41,7 @@ type FeedItem = {
     } | null;
   } | null;
   review_reactions: {
+    user_id: string;
     reaction: ReactionType;
   }[];
   review_comments: {
@@ -70,6 +71,8 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [expandedReviews, setExpandedReviews] = useState<string[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  // Reviews with a like being saved, so a double tap doesn't send two.
+  const [likeSaving, setLikeSaving] = useState<string[]>([]);
   useFocusEffect(
     useCallback(() => {
       loadFeed();
@@ -128,6 +131,7 @@ export default function HomeScreen() {
           )
         ),
         review_reactions (
+          user_id,
           reaction
         ),
         review_comments (
@@ -160,6 +164,57 @@ export default function HomeScreen() {
     ];
     entries.sort((a, b) => b.at.localeCompare(a.at));
     setFeed(entries.slice(0, FEED_SIZE));
+  }
+  // Like or unlike a review right from the feed. Shows the change at once and
+  // puts it back if saving fails.
+  async function toggleLike(item: FeedItem) {
+    if (!currentUserId || likeSaving.includes(item.id)) return;
+    const userId = currentUserId;
+    const liked = (item.review_reactions ?? []).some(
+      (reaction) => reaction.user_id === userId,
+    );
+    const updateReactions = (
+      change: (
+        reactions: FeedItem["review_reactions"],
+      ) => FeedItem["review_reactions"],
+    ) =>
+      setFeed((current) =>
+        current.map((entry) =>
+          entry.kind === "dish" && entry.item.id === item.id
+            ? {
+                ...entry,
+                item: {
+                  ...entry.item,
+                  review_reactions: change(entry.item.review_reactions ?? []),
+                },
+              }
+            : entry,
+        ),
+      );
+    const unlike = (reactions: FeedItem["review_reactions"]) =>
+      reactions.filter((reaction) => reaction.user_id !== userId);
+    const like = (reactions: FeedItem["review_reactions"]) => [
+      ...reactions,
+      { user_id: userId, reaction: "❤️" as const },
+    ];
+    updateReactions(liked ? unlike : like);
+    setLikeSaving((current) => [...current, item.id]);
+    const { error } = liked
+      ? await supabase
+          .from("review_reactions")
+          .delete()
+          .eq("review_id", item.id)
+          .eq("user_id", userId)
+      : await supabase.from("review_reactions").insert({
+          review_id: item.id,
+          user_id: userId,
+          reaction: "❤️",
+        });
+    setLikeSaving((current) => current.filter((id) => id !== item.id));
+    if (error) {
+      updateReactions(liked ? like : unlike);
+      Alert.alert("Like error", error.message);
+    }
   }
   // Restaurant ratings by you and the people you follow. Brand-wide ratings
   // have no location, so they link to any of the brand's.
@@ -458,6 +513,10 @@ export default function HomeScreen() {
               ? reviewText.slice(0, 240).trimEnd() + "…"
               : reviewText;
           const restaurant = item.dishes?.restaurants;
+          const likeCount = (item.review_reactions ?? []).length;
+          const liked = (item.review_reactions ?? []).some(
+            (reaction) => reaction.user_id === currentUserId,
+          );
           const photoUrl = item.photo_path
             ? getPhotoUrl(item.photo_path)
             : null;
@@ -506,7 +565,9 @@ export default function HomeScreen() {
                     </Text>
                   )}
                 </View>
-                <Text style={styles.rating}>{formatRating(item.rating, isPremium)}★</Text>
+                <Text style={styles.rating}>
+                  {formatRating(item.rating, isPremium)}★
+                </Text>
               </View>
               {photoUrl ? (
                 <TouchableOpacity
@@ -550,13 +611,19 @@ export default function HomeScreen() {
               ) : null}
               <View style={styles.engagementRow}>
                 {/* Every reaction counts as a like. */}
-                {(item.review_reactions ?? []).length > 0 ? (
-                  <View style={styles.engagementItem}>
-                    <Text style={styles.engagementText}>
-                      ♥ {(item.review_reactions ?? []).length}
-                    </Text>
-                  </View>
-                ) : null}
+                <TouchableOpacity
+                  style={styles.engagementItem}
+                  onPress={() => toggleLike(item)}
+                  hitSlop={10}
+                  accessibilityLabel={liked ? "Unlike" : "Like"}
+                >
+                  <Text style={[styles.heart, liked && styles.heartOn]}>
+                    {liked ? "♥" : "♡"}
+                  </Text>
+                  {likeCount > 0 ? (
+                    <Text style={styles.engagementText}>{likeCount}</Text>
+                  ) : null}
+                </TouchableOpacity>
                 {commentCount > 0 ? (
                   <Text style={styles.commentCount}>
                     {commentCount} {commentCount === 1 ? "comment" : "comments"}
@@ -564,7 +631,9 @@ export default function HomeScreen() {
                 ) : null}
               </View>
               <TouchableOpacity onPress={() => openReview(item.id)}>
-                <Text style={styles.viewReview}>View likes & comments</Text>
+                <Text style={styles.viewReview}>
+                  {commentCount > 0 ? "View comments" : "Add a comment"}
+                </Text>
               </TouchableOpacity>
             </View>
           );
@@ -719,6 +788,14 @@ const styles = StyleSheet.create({
   engagementItem: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 5,
+  },
+  heart: {
+    fontSize: 22,
+    color: Palette.text,
+  },
+  heartOn: {
+    color: Palette.danger,
   },
   engagementText: {
     fontSize: 14,

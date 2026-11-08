@@ -931,7 +931,7 @@ export default function LogScreen() {
     dishName: string,
     match: DishResult | null,
     newVariant: DishEntry["newVariant"],
-  ) {
+  ): Promise<string> {
     // A dish matched at another location of the brand gets its own row here,
     // so the review stays tied to the location the user actually visited.
     if (match?.restaurant_id === restaurantId) {
@@ -948,6 +948,31 @@ export default function LogScreen() {
       return existing.id;
     }
 
+    // A flavor of a dish that isn't on the menu yet ("Pistachio" of a first
+    // Gelato): add the dish first, then the flavor under it.
+    let variant = newVariant;
+
+    if (variant && !variant.of && variant.parentName) {
+      const parentId = await findOrCreateDish(
+        restaurantId,
+        variant.parentName,
+        null,
+        null,
+      );
+
+      const { data: parent } = await supabase
+        .from("dishes")
+        .select("name_key, variant_of")
+        .eq("id", parentId)
+        .single();
+
+      // Flavors don't nest, so a flavor of a flavor goes under its dish.
+      variant = {
+        ...variant,
+        of: parent?.variant_of ?? parent?.name_key ?? null,
+      };
+    }
+
     const { data: newDish, error: insertError } = await supabase
       .from("dishes")
       .insert({
@@ -956,9 +981,9 @@ export default function LogScreen() {
         name,
 
         // A variant stays one at every location.
-        variant_of: match?.variant_of ?? newVariant?.of ?? null,
+        variant_of: match?.variant_of ?? variant?.of ?? null,
 
-        variant_label: match?.variant_label ?? newVariant?.label ?? null,
+        variant_label: match?.variant_label ?? variant?.label ?? null,
       })
       .select("id")
       .single();

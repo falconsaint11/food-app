@@ -809,7 +809,7 @@ export default function RestaurantDetailScreen() {
             <Text style={styles.dishSubtext}>
               {reviewCount} {reviewCount === 1 ? 'review' : 'reviews'}
               {variantCount > 0
-                ? ` · ${variantCount} ${variantCount === 1 ? 'variant' : 'variants'}`
+                ? ` · ${variantCount} ${variantCount === 1 ? 'type' : 'types'}`
                 : ''}
             </Text>
 

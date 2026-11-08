@@ -23,8 +23,8 @@ type MenuDish = {
   nameKey: string;
 };
 
-// Curator tool: fix a dish's name, price, description, options and tags, or
-// make it a variant of another dish. Admins can also mark it discontinued.
+// Curator tool: fix a dish's name, price, description, options and tags, add
+// flavors or types of it, or make it a flavor or type of another dish. Admins can also mark it discontinued.
 // Everything but price applies at every location of the brand (see
 // admin_update_dish() and set_dish_tag()).
 export default function DishEditScreen() {
@@ -44,6 +44,11 @@ export default function DishEditScreen() {
   const [parentSearch, setParentSearch] = useState('');
   const [discontinued, setDiscontinued] = useState(false);
   const [menu, setMenu] = useState<MenuDish[]>([]);
+  const [restaurantId, setRestaurantId] = useState<string | null>(null);
+  // Flavors and types of this dish ("Pistachio" of Gelato).
+  const [types, setTypes] = useState<MenuDish[]>([]);
+  const [typeDraft, setTypeDraft] = useState('');
+  const [addingType, setAddingType] = useState(false);
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [tagSlugs, setTagSlugs] = useState<string[]>([]);
   const [savingTag, setSavingTag] = useState<string | null>(null);
@@ -55,7 +60,7 @@ export default function DishEditScreen() {
       const { data: dish, error } = await supabase
         .from('dishes')
         .select(
-          'name, name_key, price, description, options, variant_of, variant_label, discontinued_at, restaurants (id, brand_id)'
+          'name, name_key, price, description, options, variant_of, variant_label, discontinued_at, restaurants (id, brand_id)',
         )
         .eq('id', id)
         .maybeSingle();
@@ -81,15 +86,18 @@ export default function DishEditScreen() {
       setDiscontinued(dish.discontinued_at !== null);
 
       if (restaurant) {
+        setRestaurantId(restaurant.id);
+
         const locationIds = await getBrandLocationIds(
           restaurant.id,
-          restaurant.brand_id
+          restaurant.brand_id,
         );
 
         const { data: menuData } = await supabase
           .from('dishes')
-          .select('id, name, name_key, variant_of')
-          .in('restaurant_id', locationIds);
+          .select('id, name, name_key, variant_of, variant_label')
+          .in('restaurant_id', locationIds)
+          .is('discontinued_at', null);
 
         // Tags count across every location's row of this dish.
         const sameDishIds = (menuData ?? [])
@@ -111,7 +119,20 @@ export default function DishEditScreen() {
         }
 
         setMenu(
-          [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name))
+          [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name)),
+        );
+
+        const typesByKey = new Map<string, MenuDish>();
+        for (const row of menuData ?? []) {
+          if (row.variant_of !== dish.name_key) continue;
+          typesByKey.set(row.name_key, {
+            name: row.variant_label ?? row.name,
+            nameKey: row.name_key,
+          });
+        }
+
+        setTypes(
+          [...typesByKey.values()].sort((a, b) => a.name.localeCompare(b.name)),
         );
       }
 
@@ -126,7 +147,7 @@ export default function DishEditScreen() {
   const parentMatches = parentSearch.trim()
     ? menu
         .filter((dish) =>
-          dish.name.toLowerCase().includes(parentSearch.trim().toLowerCase())
+          dish.name.toLowerCase().includes(parentSearch.trim().toLowerCase()),
         )
         .slice(0, 6)
     : [];
@@ -138,7 +159,10 @@ export default function DishEditScreen() {
     // "Steak Quesadilla" under "Quesadilla" -> "Steak".
     if (!variantLabel.trim()) {
       const guess = name
-        .replace(new RegExp(dish.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), '')
+        .replace(
+          new RegExp(dish.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'),
+          '',
+        )
         .trim();
       setVariantLabel(guess || name);
     }
@@ -150,6 +174,45 @@ export default function DishEditScreen() {
 
     setOptions([...options, option]);
     setOptionDraft('');
+  }
+
+  // A new flavor or type is its own dish ("Pistachio Gelato"), listed under
+  // this one on the menu. Saved right away, like tags.
+  async function addType() {
+    const label = typeDraft.trim();
+    if (!label || !restaurantId || !nameKey) return;
+
+    setAddingType(true);
+
+    const { data, error } = await supabase
+      .from('dishes')
+      .insert({
+        restaurant_id: restaurantId,
+        name: `${label} ${name.trim()}`,
+        variant_of: nameKey,
+        variant_label: label,
+      })
+      .select('name_key')
+      .single();
+
+    setAddingType(false);
+
+    if (error || !data) {
+      Alert.alert(
+        'Error',
+        error?.code === '23505'
+          ? 'That one is already on the menu.'
+          : (error?.message ?? 'Could not add it.'),
+      );
+      return;
+    }
+
+    setTypes((current) =>
+      [...current, { name: label, nameKey: data.name_key as string }].sort(
+        (a, b) => a.name.localeCompare(b.name),
+      ),
+    );
+    setTypeDraft('');
   }
 
   // Tag changes save right away, separately from the form.
@@ -171,7 +234,7 @@ export default function DishEditScreen() {
     }
 
     setTagSlugs((current) =>
-      on ? [...current, slug] : current.filter((other) => other !== slug)
+      on ? [...current, slug] : current.filter((other) => other !== slug),
     );
   }
 
@@ -184,7 +247,7 @@ export default function DishEditScreen() {
     }
 
     if (variantOf && !variantLabel.trim()) {
-      Alert.alert('Name the variant', 'Like Steak or Mango.');
+      Alert.alert('Name the flavor or type', 'Like Pistachio or Steak.');
       return;
     }
 
@@ -263,7 +326,9 @@ export default function DishEditScreen() {
           <TouchableOpacity
             key={option}
             style={styles.optionRow}
-            onPress={() => setOptions(options.filter((other) => other !== option))}
+            onPress={() =>
+              setOptions(options.filter((other) => other !== option))
+            }
           >
             <Text style={styles.optionText}>• {option}</Text>
             <Text style={styles.remove}>✕</Text>
@@ -284,12 +349,52 @@ export default function DishEditScreen() {
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.label}>Variant</Text>
-        {variantOf ? (
+        {!variantOf ? (
+          <>
+            <Text style={styles.label}>Flavors and types</Text>
+            <Text style={styles.hint}>
+              Each is rated on its own and listed under this dish on the menu.
+              Saved as soon as you add it.
+            </Text>
+            {types.map((type) => (
+              <Text
+                key={type.nameKey}
+                style={[styles.optionText, styles.typeRow]}
+              >
+                • {type.name}
+              </Text>
+            ))}
+            <View style={styles.addRow}>
+              <TextInput
+                style={[styles.input, styles.addInput]}
+                value={typeDraft}
+                onChangeText={setTypeDraft}
+                onSubmitEditing={addType}
+                placeholder="Like Pistachio or Steak"
+                placeholderTextColor={Palette.textMuted}
+                maxLength={40}
+                editable={!addingType}
+              />
+              <TouchableOpacity
+                onPress={addType}
+                disabled={addingType || !typeDraft.trim()}
+              >
+                <Text style={styles.link}>
+                  {addingType ? 'Adding…' : 'Add'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        ) : null}
+
+        {types.length === 0 ? (
+          <Text style={styles.label}>Flavor or type of another dish</Text>
+        ) : null}
+        {types.length > 0 ? null : variantOf ? (
           <>
             <View style={styles.optionRow}>
               <Text style={styles.optionText}>
-                A version of {parent?.name ?? variantOf}
+                A flavor or type of {parent?.name ?? variantOf}
               </Text>
               <TouchableOpacity
                 onPress={() => {
@@ -304,7 +409,7 @@ export default function DishEditScreen() {
               style={styles.input}
               value={variantLabel}
               onChangeText={setVariantLabel}
-              placeholder="Shown under it, like Steak"
+              placeholder="Shown under it, like Pistachio"
               placeholderTextColor={Palette.textMuted}
               maxLength={40}
             />
@@ -315,7 +420,7 @@ export default function DishEditScreen() {
               style={styles.input}
               value={parentSearch}
               onChangeText={setParentSearch}
-              placeholder="Make it a version of… (search the menu)"
+              placeholder="Search the menu"
               placeholderTextColor={Palette.textMuted}
             />
             {parentMatches.map((dish) => (
@@ -364,7 +469,7 @@ export default function DishEditScreen() {
               <Text style={styles.switchLabel}>Discontinued</Text>
               <Text style={styles.switchHint}>
                 Hidden from the menu and Log suggestions. Reviews stay, labeled
-                Discontinued. Its variants follow.
+                Discontinued. Its flavors and types follow.
               </Text>
             </View>
             <Switch
@@ -378,7 +483,10 @@ export default function DishEditScreen() {
 
       <View style={styles.footer}>
         <TouchableOpacity
-          style={[styles.saveButton, (saving || !name.trim()) && styles.disabled]}
+          style={[
+            styles.saveButton,
+            (saving || !name.trim()) && styles.disabled,
+          ]}
           onPress={save}
           disabled={saving || !name.trim() || !nameKey}
         >
@@ -452,6 +560,9 @@ const styles = StyleSheet.create({
   },
   addInput: {
     flex: 1,
+  },
+  typeRow: {
+    paddingVertical: 6,
   },
   link: {
     color: Palette.accent,

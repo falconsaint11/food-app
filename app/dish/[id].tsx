@@ -373,14 +373,14 @@ export default function DishDetailScreen() {
             }
           >
             <Text style={styles.relatedText}>
-              A version of <Text style={styles.relatedLink}>{parentDish.name}</Text>
+              A type of <Text style={styles.relatedLink}>{parentDish.name}</Text>
             </Text>
           </TouchableOpacity>
         ) : null}
 
         {variants.length > 0 ? (
           <View style={styles.variantRow}>
-            <Text style={styles.relatedText}>Variants:</Text>
+            <Text style={styles.relatedText}>Flavors and types:</Text>
             {variants.map((variant) => (
               <TouchableOpacity
                 key={variant.id}

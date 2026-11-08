@@ -22,14 +22,23 @@ import {
 } from '@/lib/moderation';
 import { supabase } from '@/lib/supabase';
 
+// An extra option at the top of the menu, like Edit, Delete or Pin.
+export type MenuAction = {
+  label: string;
+  onPress: () => void;
+  destructive?: boolean;
+};
+
 type ContentMenuProps = {
   targetType: ReportTargetType;
   targetId: string;
-  // Who posted it (or the profile's user). The menu hides on your own content.
+  // Who posted it (or the profile's user). Report and Block hide on your own
+  // content; the menu shows there only when it has actions.
   authorId: string | null;
   authorName: string;
   // Called after blocking, so the screen can hide the content or leave.
   onBlocked?: () => void;
+  actions?: MenuAction[];
   style?: StyleProp<ViewStyle>;
 };
 
@@ -43,13 +52,15 @@ const TARGET_LABELS: Record<ReportTargetType, string> = {
   user: 'profile',
 };
 
-// "⋯" button with Report and Block, for anything another user posted.
+// "⋯" button with any actions (Edit, Delete, Pin…), then Report and Block for
+// anything another user posted.
 export function ContentMenu({
   targetType,
   targetId,
   authorId,
   authorName,
   onBlocked,
+  actions = [],
   style,
 }: ContentMenuProps) {
   const [myId, setMyId] = useState<string | null>(null);
@@ -63,8 +74,16 @@ export function ContentMenu({
     });
   }, []);
 
-  if (!authorId || authorId === myId) {
+  const canReport = !!authorId && !!myId && authorId !== myId;
+
+  if (!canReport && actions.length === 0) {
     return null;
+  }
+
+  // Close the sheet first: iOS drops an alert shown while a modal is closing.
+  function runAction(action: MenuAction) {
+    setOpen(false);
+    setTimeout(action.onPress, 350);
   }
 
   function openMenu() {
@@ -88,7 +107,7 @@ export function ContentMenu({
     } catch (error) {
       Alert.alert(
         'Could not send report',
-        error instanceof Error ? error.message : 'Something went wrong.'
+        error instanceof Error ? error.message : 'Something went wrong.',
       );
     } finally {
       setBusy(false);
@@ -107,7 +126,7 @@ export function ContentMenu({
     } catch (error) {
       Alert.alert(
         'Could not block',
-        error instanceof Error ? error.message : 'Something went wrong.'
+        error instanceof Error ? error.message : 'Something went wrong.',
       );
     } finally {
       setBusy(false);
@@ -142,6 +161,27 @@ export function ContentMenu({
 
         <View style={styles.sheet}>
           {step === 'menu' ? (
+            <>
+              {actions.map((action) => (
+                <TouchableOpacity
+                  key={action.label}
+                  style={styles.option}
+                  onPress={() => runAction(action)}
+                >
+                  <Text
+                    style={[
+                      styles.optionText,
+                      action.destructive && styles.danger,
+                    ]}
+                  >
+                    {action.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </>
+          ) : null}
+
+          {step === 'menu' && canReport ? (
             <>
               <TouchableOpacity
                 style={styles.option}
@@ -188,8 +228,8 @@ export function ContentMenu({
               <Text style={styles.title}>Thanks for letting us know</Text>
 
               <Text style={styles.body}>
-                We’ll review this. You can also block {authorName} so you
-                don’t see their posts.
+                We’ll review this. You can also block {authorName} so you don’t
+                see their posts.
               </Text>
 
               <TouchableOpacity

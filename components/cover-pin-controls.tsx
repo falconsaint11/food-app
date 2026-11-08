@@ -1,22 +1,22 @@
 import { useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert } from 'react-native';
 
-import { Palette } from '@/constants/theme';
+import { MenuAction } from '@/components/content-menu';
 import { useIsCurator } from '@/lib/admin';
 import { supabase } from '@/lib/supabase';
 
 type Target = 'dish' | 'restaurant';
 
-// Curator buttons under a review photo: pin it as the cover of its dish or
-// its restaurant (see pin_cover_photo()), or unpin it. Hidden for everyone
-// else.
-export function CoverPinControls({ reviewId }: { reviewId: string }) {
+// Curator options for a review photo's "⋯" menu: pin it as the cover of its
+// dish or its restaurant (see pin_cover_photo()), or unpin it. Empty for
+// everyone else.
+export function useCoverPinActions(reviewId: string, hasPhoto: boolean) {
   const isCurator = useIsCurator();
   const [pinned, setPinned] = useState<Record<Target, boolean> | null>(null);
-  const [busy, setBusy] = useState<Target | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!isCurator) return;
+    if (!isCurator || !hasPhoto) return;
 
     supabase
       .rpc('cover_pin_status', { p_review_id: reviewId })
@@ -32,17 +32,17 @@ export function CoverPinControls({ reviewId }: { reviewId: string }) {
           restaurant: row?.restaurant_pinned === true,
         });
       });
-  }, [isCurator, reviewId]);
+  }, [isCurator, hasPhoto, reviewId]);
 
-  if (!isCurator || !pinned) {
-    return null;
+  if (!isCurator || !hasPhoto || !pinned) {
+    return [];
   }
 
   async function toggle(target: Target) {
-    if (!pinned) return;
+    if (!pinned || busy) return;
 
     const pin = !pinned[target];
-    setBusy(target);
+    setBusy(true);
 
     const { error } = await supabase.rpc('pin_cover_photo', {
       p_review_id: reviewId,
@@ -50,7 +50,7 @@ export function CoverPinControls({ reviewId }: { reviewId: string }) {
       p_pin: pin,
     });
 
-    setBusy(null);
+    setBusy(false);
 
     if (error) {
       Alert.alert('Could not pin', error.message);
@@ -60,51 +60,10 @@ export function CoverPinControls({ reviewId }: { reviewId: string }) {
     setPinned({ ...pinned, [target]: pin });
   }
 
-  return (
-    <View style={styles.row}>
-      {(['dish', 'restaurant'] as const).map((target) => (
-        <TouchableOpacity
-          key={target}
-          style={[styles.button, pinned[target] && styles.buttonOn]}
-          onPress={() => toggle(target)}
-          disabled={busy !== null}
-        >
-          <Text style={[styles.text, pinned[target] && styles.textOn]}>
-            {busy === target
-              ? '…'
-              : pinned[target]
-                ? `📌 ${target === 'dish' ? 'Dish' : 'Restaurant'} cover · Unpin`
-                : `Pin as ${target} cover`}
-          </Text>
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
+  return (['dish', 'restaurant'] as const).map((target): MenuAction => ({
+    label: pinned[target]
+      ? `Unpin ${target} cover 📌`
+      : `Pin as ${target} cover`,
+    onPress: () => toggle(target),
+  }));
 }
-
-const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 10,
-  },
-  button: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Palette.borderStrong,
-  },
-  buttonOn: {
-    borderColor: Palette.accent,
-  },
-  text: {
-    color: Palette.textSecondary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  textOn: {
-    color: Palette.accent,
-  },
-});

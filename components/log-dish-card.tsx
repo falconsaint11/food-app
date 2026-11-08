@@ -47,8 +47,10 @@ export type DishEntry = {
   // after choosing one.
   variantParent: DishResult | null;
 
-  // A variant typed in with "+ New" ("Steak" of Quesadilla), created on save.
-  newVariant: { of: string; label: string } | null;
+  // A flavor or type typed in with "+ New" ("Steak" of Quesadilla), created
+  // on save. For a dish not on the menu yet, `of` is null and parentName is
+  // the dish, which is added first.
+  newVariant: { of: string | null; label: string; parentName?: string } | null;
 
   rating: number;
 
@@ -116,6 +118,9 @@ export function LogDishCard({
   // The "+ New" variant being typed, or null when the input is closed.
   const [variantDraft, setVariantDraft] = useState<string | null>(null);
 
+  // A flavor being typed for a dish that isn't on the menu yet.
+  const [newDishFlavor, setNewDishFlavor] = useState<string | null>(null);
+
   const [expanded, setExpanded] = useState(
     Boolean(entry.notes || entry.photoUri),
   );
@@ -153,6 +158,8 @@ export function LogDishCard({
       // Clearing the dish starts tagging over.
       ...(text.trim().length < 2 ? { tags: [], tagsTouched: false } : {}),
     });
+
+    setNewDishFlavor(null);
 
     const version = ++searchVersion.current;
 
@@ -192,6 +199,14 @@ export function LogDishCard({
     setVariantDraft(null);
   }
 
+  function startFirstVariant() {
+    if (!entry.matchedDish) return;
+
+    onChange({ variantParent: entry.matchedDish });
+    setVariants([]);
+    setVariantDraft("");
+  }
+
   function addVariant() {
     const parent = entry.variantParent;
     const label = variantDraft?.trim();
@@ -203,6 +218,26 @@ export function LogDishCard({
       newVariant: { of: parent.name_key, label },
     });
     setVariantDraft(null);
+  }
+
+  function addNewDishFlavor() {
+    const dishName = entry.name.trim();
+    const label = newDishFlavor?.trim();
+    if (!dishName || !label) return;
+
+    onChange({
+      name: `${label} ${dishName}`,
+      matchedDish: null,
+      newVariant: { of: null, label, parentName: dishName },
+    });
+    setResults([]);
+    setNewDishFlavor(null);
+  }
+
+  function removeNewDishFlavor() {
+    if (!entry.newVariant?.parentName) return;
+
+    onChange({ name: entry.newVariant.parentName, newVariant: null });
   }
 
   function toggleTag(slug: string) {
@@ -301,13 +336,64 @@ export function LogDishCard({
         </View>
       ) : null}
 
+      {/* A dish that's new to the menu can get a flavor right away too. */}
+      {entry.newVariant?.parentName ? (
+        <View style={styles.onMenuRow}>
+          <Text style={styles.onMenuText}>
+            New: {entry.newVariant.label} {entry.newVariant.parentName}
+          </Text>
+
+          <TouchableOpacity onPress={removeNewDishFlavor} disabled={disabled}>
+            <Text style={styles.onMenuText}>Remove flavor</Text>
+          </TouchableOpacity>
+        </View>
+      ) : !entry.matchedDish &&
+        !entry.variantParent &&
+        entry.name.trim().length >= 2 ? (
+        newDishFlavor === null ? (
+          <TouchableOpacity
+            onPress={() => setNewDishFlavor("")}
+            disabled={disabled}
+          >
+            <Text style={styles.onMenuText}>+ Add a flavor or type</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.variantInputRow}>
+            <TextInput
+              style={styles.variantInput}
+              placeholder={`Which ${entry.name.trim()}? Like Pistachio`}
+              placeholderTextColor={Palette.textMuted}
+              value={newDishFlavor}
+              onChangeText={setNewDishFlavor}
+              onSubmitEditing={addNewDishFlavor}
+              maxLength={40}
+              autoFocus
+            />
+
+            <TouchableOpacity onPress={addNewDishFlavor}>
+              <Text style={styles.variantAddText}>Add</Text>
+            </TouchableOpacity>
+          </View>
+        )
+      ) : null}
+
       {entry.matchedDish && !entry.variantParent ? (
-        <Text style={styles.onMenuText}>✓ On the menu</Text>
+        <View style={styles.onMenuRow}>
+          <Text style={styles.onMenuText}>✓ On the menu</Text>
+
+          {/* Any dish can get a flavor or type ("Pistachio" Gelato), not
+              just ones that already have some. */}
+          {!entry.matchedDish.variant_of && entry.matchedDish.name_key ? (
+            <TouchableOpacity onPress={startFirstVariant} disabled={disabled}>
+              <Text style={styles.onMenuText}>+ Add a flavor or type</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
       ) : null}
 
       {entry.variantParent ? (
         <View style={styles.variantBox}>
-          <Text style={styles.variantPrompt}>Which one?</Text>
+          <Text style={styles.variantPrompt}>Which flavor or type?</Text>
 
           <View style={styles.tagChips}>
             {[null, ...variants].map((variant) => {
@@ -358,7 +444,7 @@ export function LogDishCard({
             <View style={styles.variantInputRow}>
               <TextInput
                 style={styles.variantInput}
-                placeholder="Like Steak or Mango"
+                placeholder="Like Pistachio or Steak"
                 placeholderTextColor={Palette.textMuted}
                 value={variantDraft}
                 onChangeText={setVariantDraft}
@@ -579,6 +665,14 @@ const styles = StyleSheet.create({
     fontSize: 15,
 
     color: Palette.text,
+  },
+
+  onMenuRow: {
+    flexDirection: "row",
+
+    justifyContent: "space-between",
+
+    alignItems: "center",
   },
 
   onMenuText: {
