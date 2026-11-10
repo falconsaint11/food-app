@@ -15,6 +15,7 @@ import {
 
 import { AddToListButton } from '@/components/add-to-list-button';
 import { ContentMenu } from '@/components/content-menu';
+import { withFlag } from '@/lib/countries';
 import {
   CoverPhoto,
   CoverPhotos,
@@ -37,6 +38,7 @@ type Restaurant = {
   id: string;
   name: string;
   brand_id: string | null;
+  country_code: string | null;
   brands: {
     name: string;
     cover_review_id: string | null;
@@ -363,7 +365,7 @@ export default function RestaurantDetailScreen() {
       const { data: restaurantData, error: restaurantError } = await supabase
         .from('restaurants')
         .select(
-          'id, name, brand_id, cover_review_id, cover_photo_id, is_food_truck, latitude, longitude, brands (name, cover_review_id, cover_photo_id)'
+          'id, name, brand_id, country_code, cover_review_id, cover_photo_id, is_food_truck, latitude, longitude, brands (name, cover_review_id, cover_photo_id)'
         )
         .eq('id', id)
         .maybeSingle();
@@ -985,7 +987,9 @@ export default function RestaurantDetailScreen() {
       <View style={styles.container}>
         <View style={styles.headerRow}>
           <View style={styles.headerInfo}>
-            <Text style={styles.title}>{restaurantName}</Text>
+            <Text style={styles.title}>
+              {withFlag(restaurantName, restaurant.country_code)}
+            </Text>
 
             {restaurant.is_food_truck ? (
               <Text style={styles.foodTruckBadge}>🚚 Food truck</Text>

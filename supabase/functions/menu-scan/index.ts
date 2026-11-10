@@ -25,11 +25,11 @@ const MAX_IMAGE_LENGTH = 6_900_000;
 
 const SYSTEM_PROMPT = `You read photos of restaurant menus and list the dishes on them for a food rating app.
 
-List every dish and drink a customer can order, once each. Write each name as printed, without prices, symbols or descriptions. Skip anything you can't read with confidence.
+List every dish and drink a customer can order, once each. Write each name as printed, without prices, symbols or descriptions, even when the menu isn't in English. Skip anything you can't read with confidence.
 
 One entry per menu item, even when it comes with choices: "Quesadilla - add protein +$3" is one dish called "Quesadilla", not one per protein. Never invent dishes for combinations the menu doesn't name. Add-ons, sauces and upgrades are not dishes of their own.
 
-- description: the ingredients or description printed with the dish, as written. "" if none.
+- description: the ingredients or description printed with the dish, as written. "" if none. When the dish name isn't in English, start with its English name and a period, like "Fried rice." for 炒饭 or "Grilled pork skewers." for "Brochetas de cerdo", then any printed description.
 - options: short notes on the choices printed for that dish, like "Add protein +$3", "Soft or crunchy", "Black or pinto beans", "Small $3.25 / Big $6". Choices printed for a whole section ("any taco soft or crunchy", "double stack any taco +$2") go on every dish in that section. Skip upgrades offered on every item on the menu.
 - variants: when the menu names the flavors or proteins a dish comes in, and picking one makes it a noticeably different dish, list them as short labels: "Margaritas - mango, strawberry, lime" gives ["Mango", "Strawberry", "Lime"]; "Quesadilla - chicken, steak or shrimp +$3" gives ["Chicken", "Steak", "Shrimp"]. Use [] when the menu doesn't name them ("add protein +$3" alone). Small choices that don't change the dish much (soft or crunchy, bean type, size) go in options instead.
 - price: the lowest price. For "$3.25/6", that's 3.25, with the sizes in options.
@@ -100,8 +100,9 @@ Deno.serve(async (req) => {
 
     const client = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
 
+    // Sonnet reads menus about as well as Opus at half the price.
     const response = await client.beta.messages.create({
-      model: "claude-opus-5-5",
+      model: "claude-sonnet-5-5",
       max_tokens: 16000,
       // If a safety check declines the request, the API retries it on a
       // fallback model instead of returning a refusal.

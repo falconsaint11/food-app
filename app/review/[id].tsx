@@ -25,6 +25,7 @@ import { ContentMenu } from "@/components/content-menu";
 import { useCoverPinActions } from "@/components/cover-pin-controls";
 import { fetchHiddenUserIds, withoutHiddenUsers } from "@/lib/moderation";
 import { formatRating, useIsPremium } from "@/lib/ratings";
+import { withFlag } from "@/lib/countries";
 import { dishLabel } from "@/lib/dishes";
 import { supabase } from "@/lib/supabase";
 import { Palette } from "@/constants/theme";
@@ -63,6 +64,8 @@ type Review = {
       name: string;
 
       city: string | null;
+
+      country_code: string | null;
     } | null;
   } | null;
 };
@@ -236,7 +239,9 @@ export default function ReviewDetailScreen() {
 
               name,
 
-              city
+              city,
+
+              country_code
 
             )
 
@@ -899,7 +904,10 @@ export default function ReviewDetailScreen() {
                   }
                 >
                   <Text style={styles.restaurantLink}>
-                    {review.dishes.restaurants.name}
+                    {withFlag(
+                      review.dishes.restaurants.name,
+                      review.dishes.restaurants.country_code,
+                    )}
 
                     {review.dishes.restaurants.city
                       ? ` · ${review.dishes.restaurants.city}`

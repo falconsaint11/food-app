@@ -42,3 +42,6 @@ app-example
 /ios
 /android
 .env
+
+# Menu photos for bulk imports, read by Claude, not shipped
+menu-photos/

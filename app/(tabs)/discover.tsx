@@ -25,6 +25,7 @@ import {
   GooglePlaceSuggestion,
   searchGoogleFoodPlaces,
 } from '@/lib/google-places';
+import { withFlag } from '@/lib/countries';
 import { withoutHiddenUsers } from '@/lib/moderation';
 import { supabase } from '@/lib/supabase';
 import { fetchTags, Tag } from '@/lib/tags';
@@ -44,6 +45,7 @@ type RestaurantResult = {
   city: string | null;
   state: string | null;
   google_place_id: string | null;
+  country_code: string | null;
 };
 
 type DishResult = {
@@ -934,7 +936,7 @@ export default function DiscoverScreen() {
 
       const { data, error } = await supabase
         .from('restaurants')
-        .select('id, name, city, state, google_place_id')
+        .select('id, name, city, state, google_place_id, country_code')
         .or(
           `name.ilike.${pattern},city.ilike.${pattern},state.ilike.${pattern}`
         )
@@ -1183,7 +1185,9 @@ export default function DiscoverScreen() {
           <Text style={styles.resultEmoji}>🍽️</Text>
         </View>
         <View style={styles.resultText}>
-          <Text style={styles.primaryText}>{restaurant.name}</Text>
+          <Text style={styles.primaryText}>
+            {withFlag(restaurant.name, restaurant.country_code)}
+          </Text>
           {locationText(restaurant.city, restaurant.state) ? (
             <Text style={styles.secondaryText}>
               {locationText(restaurant.city, restaurant.state)}

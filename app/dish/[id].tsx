@@ -25,6 +25,7 @@ import { withoutHiddenUsers } from '@/lib/moderation';
 import { formatAverage, formatRating, useIsPremium } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
 import { fetchDishPublicTags, Tag } from '@/lib/tags';
+import { withFlag } from '@/lib/countries';
 import { Palette } from '@/constants/theme';
 
 type Dish = {
@@ -43,6 +44,9 @@ type Dish = {
     id: string;
     name: string;
     brand_id: string | null;
+    // As Google prints it, like "USA" or "Japan".
+    country: string | null;
+    country_code: string | null;
     brands: {
       name: string;
     } | null;
@@ -83,6 +87,8 @@ export default function DishDetailScreen() {
   const [parentDish, setParentDish] = useState<RelatedDish | null>(null);
   const [variants, setVariants] = useState<RelatedDish[]>([]);
   const [loading, setLoading] = useState(true);
+  // Locations of this dish's restaurant, to tell chains apart.
+  const [locationCount, setLocationCount] = useState(1);
 
   useFocusEffect(
     useCallback(() => {
@@ -115,6 +121,8 @@ export default function DishDetailScreen() {
           id,
           name,
           brand_id,
+          country,
+          country_code,
           brands (name)
         )
       `)
@@ -142,6 +150,7 @@ export default function DishDetailScreen() {
     let pinnedReviewId = dishRow.cover_review_id;
     setParentDish(null);
     setVariants([]);
+    setLocationCount(1);
 
     if (dishRow.restaurants) {
       try {
@@ -149,6 +158,7 @@ export default function DishDetailScreen() {
           dishRow.restaurants.id,
           dishRow.restaurants.brand_id
         );
+        setLocationCount(locationIds.length);
 
         const { data: siblingData, error: siblingError } = await supabase
           .from('dishes')
@@ -319,6 +329,13 @@ export default function DishDetailScreen() {
     );
   }
 
+  // Prices show only at single-location US restaurants: chains charge
+  // differently at each location, and other countries use other currencies.
+  const price =
+    locationCount === 1 && (dish.restaurants?.country ?? 'USA') === 'USA'
+      ? dish.price
+      : null;
+
   return (
     <ScrollView
       style={styles.screen}
@@ -361,7 +378,10 @@ export default function DishDetailScreen() {
             }
           >
             <Text style={styles.restaurantLink}>
-              {dish.restaurants.brands?.name ?? dish.restaurants.name}
+              {withFlag(
+                dish.restaurants.brands?.name ?? dish.restaurants.name,
+                dish.restaurants.country_code
+              )}
             </Text>
           </TouchableOpacity>
         ) : null}
@@ -491,7 +511,7 @@ export default function DishDetailScreen() {
           </View>
         ) : null}
 
-        {dish.category || dish.price !== null ? (
+        {dish.category || price !== null ? (
           <View style={styles.details}>
             {dish.category ? (
               <Text style={styles.detailText}>
@@ -499,9 +519,9 @@ export default function DishDetailScreen() {
               </Text>
             ) : null}
 
-            {dish.price !== null ? (
+            {price !== null ? (
               <Text style={styles.detailText}>
-                Price: ${Number(dish.price).toFixed(2)}
+                Price: ${Number(price).toFixed(2)}
               </Text>
             ) : null}
           </View>

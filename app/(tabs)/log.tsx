@@ -1370,9 +1370,11 @@ export default function LogScreen() {
 
         // A Google place we haven't saved yet may still belong to a known chain.
         if (googlePlaceId) {
+          // The address tells which country's chain it belongs to.
           const { data: brandId, error } = await supabase.rpc("find_brand", {
             p_name: restaurantName,
             p_website: website,
+            p_address: address || null,
           });
 
           if (error) throw new Error(error.message);

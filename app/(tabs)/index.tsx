@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native";
 import { Palette } from "@/constants/theme";
+import { withFlag } from "@/lib/countries";
 type ReactionType = "😂" | "🔥" | "🤤" | "❤️";
 type FeedItem = {
   id: string;
@@ -38,6 +39,7 @@ type FeedItem = {
       id: string;
       name: string;
       city: string | null;
+      country_code: string | null;
     } | null;
   } | null;
   review_reactions: {
@@ -57,6 +59,7 @@ type RestaurantFeedItem = {
   visited_at: string;
   restaurantId: string;
   restaurantName: string;
+  countryCode: string | null;
   city: string | null;
   profiles: FeedItem["profiles"];
   tagged: { id: string; username: string }[];
@@ -127,7 +130,8 @@ export default function HomeScreen() {
           restaurants (
             id,
             name,
-            city
+            city,
+            country_code
           )
         ),
         review_reactions (
@@ -232,7 +236,7 @@ export default function HomeScreen() {
         visited_at,
         restaurant_id,
         brand_id,
-        restaurants (id, name, city, brands (name))
+        restaurants (id, name, city, country_code, brands (name))
       `,
       )
       .in("user_id", userIds)
@@ -255,6 +259,7 @@ export default function HomeScreen() {
         id: string;
         name: string;
         city: string | null;
+        country_code: string | null;
         brands: { name: string } | null;
       } | null;
     };
@@ -331,6 +336,7 @@ export default function HomeScreen() {
             ? (row.restaurants?.brands?.name ?? row.restaurants?.name ?? "")
             : (brandName.get(row.brand_id ?? "") ?? ""),
           city: row.restaurant_id ? (row.restaurants?.city ?? null) : null,
+          countryCode: row.restaurants?.country_code ?? null,
           profiles: profileById.get(row.user_id) ?? null,
           tagged: tags
             .filter((tag) => tag.restaurant_rating_id === row.id)
@@ -445,7 +451,7 @@ export default function HomeScreen() {
             <Text style={styles.restaurantLabel}>Rated the restaurant</Text>
             <TouchableOpacity onPress={openRestaurant}>
               <Text style={styles.dishName}>
-                {item.restaurantName}
+                {withFlag(item.restaurantName, item.countryCode)}
                 {item.city ? ` · ${item.city}` : ""}
               </Text>
             </TouchableOpacity>
@@ -555,7 +561,7 @@ export default function HomeScreen() {
                       }
                     >
                       <Text style={styles.restaurantLink}>
-                        {restaurant.name}
+                        {withFlag(restaurant.name, restaurant.country_code)}
                         {restaurant.city ? ` · ${restaurant.city}` : ""}
                       </Text>
                     </TouchableOpacity>
