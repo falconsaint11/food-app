@@ -17,7 +17,13 @@
 // page), only food and drink places come back: no gyms, stores or other
 // businesses.
 //
-// Request:  { input, latitude?, longitude?, sessionToken?, foodOnly? }
+// Autocomplete gives at most 5 places per search, so a chain with many
+// locations nearby can leave out the one you're at (a Panda Express in a
+// mall food court). With nearby (the Log tab's "Show more locations near
+// you"), it runs a Text Search instead: up to 20 places, nearest first, in
+// the same shape. It costs more than autocomplete, so it only runs on tap.
+//
+// Request:  { input, latitude?, longitude?, sessionToken?, foodOnly?, nearby? }
 // Response: { suggestions: [{ placePrediction: { placeId, text, structuredFormat, types } }] }
 
 const FOOD_PRIMARY_TYPES = [
@@ -104,13 +110,104 @@ async function autocomplete(
   );
 }
 
+// Meters between two points.
+function distanceMeters(
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number },
+) {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.latitude - a.latitude);
+  const dLng = toRad(b.longitude - a.longitude);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.latitude)) * Math.cos(toRad(b.latitude)) *
+      Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * 6371000 * Math.asin(Math.sqrt(h)));
+}
+
+type TextSearchPlace = {
+  id?: string;
+  displayName?: { text?: string };
+  formattedAddress?: string;
+  types?: string[];
+  location?: { latitude: number; longitude: number };
+};
+
+async function nearbySearch(
+  apiKey: string,
+  input: string,
+  latitude: number,
+  longitude: number,
+) {
+  const response = await fetch(
+    "https://places.googleapis.com/v1/places:searchText",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": [
+          "places.id",
+          "places.displayName",
+          "places.formattedAddress",
+          "places.types",
+          "places.location",
+        ].join(","),
+      },
+      body: JSON.stringify({
+        textQuery: input,
+        pageSize: 20,
+        rankPreference: "DISTANCE",
+        locationBias: {
+          circle: { center: { latitude, longitude }, radius: 20000 },
+        },
+      }),
+    },
+  );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    console.error("Google Text Search error:", data);
+    throw new Error("Google Places request failed.");
+  }
+
+  const origin = { latitude, longitude };
+
+  return ((data.places ?? []) as TextSearchPlace[])
+    .filter((place) => place.id)
+    .map((place) => {
+      const name = place.displayName?.text ?? "Restaurant";
+      const address = place.formattedAddress ?? "";
+      return {
+        placePrediction: {
+          placeId: place.id,
+          text: { text: address ? `${name}, ${address}` : name },
+          structuredFormat: {
+            mainText: { text: name },
+            secondaryText: { text: address },
+          },
+          types: place.types ?? [],
+          distanceMeters: place.location
+            ? distanceMeters(origin, place.location)
+            : undefined,
+        },
+      };
+    })
+    .sort(
+      (a, b) =>
+        (a.placePrediction.distanceMeters ?? Infinity) -
+        (b.placePrediction.distanceMeters ?? Infinity),
+    );
+}
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") {
     return json({ error: "Method not allowed" }, 405);
   }
 
   try {
-    const { input, latitude, longitude, sessionToken, foodOnly } =
+    const { input, latitude, longitude, sessionToken, foodOnly, nearby } =
       await req.json();
 
     if (typeof input !== "string" || input.trim().length < 3) {
@@ -121,6 +218,16 @@ Deno.serve(async (req) => {
 
     if (!apiKey) {
       throw new Error("Google Places API key is missing.");
+    }
+
+    if (
+      nearby &&
+      typeof latitude === "number" &&
+      typeof longitude === "number"
+    ) {
+      return json({
+        suggestions: await nearbySearch(apiKey, input.trim(), latitude, longitude),
+      });
     }
 
     const base: Record<string, unknown> = {
@@ -166,14 +273,14 @@ Deno.serve(async (req) => {
     // Nearby places first, nearest first; the rest keep their order.
     const distance = (suggestion: Suggestion) =>
       suggestion.placePrediction?.distanceMeters ?? Infinity;
-    const nearby = suggestions
+    const close = suggestions
       .filter((suggestion) => distance(suggestion) <= NEARBY_METERS)
       .sort((a, b) => distance(a) - distance(b));
     const farther = suggestions.filter(
       (suggestion) => distance(suggestion) > NEARBY_METERS,
     );
 
-    return json({ suggestions: [...nearby, ...farther] });
+    return json({ suggestions: [...close, ...farther] });
   } catch (error) {
     console.error(error);
 

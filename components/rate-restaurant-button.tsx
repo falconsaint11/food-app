@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -18,6 +19,8 @@ import {
 import { StarRatingInput } from '@/components/star-rating-input';
 import { Palette } from '@/constants/theme';
 import { getBrandLocationIds } from '@/lib/brands';
+import { uploadPhoto } from '@/lib/photos';
+import { pickPhoto } from '@/lib/pick-photo';
 import { formatRating, useIsPremium } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
 
@@ -46,6 +49,7 @@ export function RateRestaurantButton({
   const [saving, setSaving] = useState(false);
   const [rating, setRating] = useState(0);
   const [notes, setNotes] = useState('');
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [pastRatings, setPastRatings] = useState<number[]>([]);
 
   async function openSheet() {
@@ -81,6 +85,7 @@ export function RateRestaurantButton({
       setPastRatings((data ?? []).map((row) => Number(row.rating)));
       setRating(0);
       setNotes('');
+      setPhotoUri(null);
     } catch (error) {
       setOpen(false);
       Alert.alert(
@@ -106,25 +111,24 @@ export function RateRestaurantButton({
 
       if (!user) throw new Error('You must be signed in to rate.');
 
+      const photoPath = photoUri ? await uploadPhoto(photoUri, user.id) : null;
+
       const { error } = await supabase
         .from('restaurant_ratings')
-        .insert(
-          brandId
-            ? {
-                user_id: user.id,
-                brand_id: brandId,
-                rating,
-                notes: notes.trim() || null,
-              }
-            : {
-                user_id: user.id,
-                restaurant_id: restaurantId,
-                rating,
-                notes: notes.trim() || null,
-              }
-        );
+        .insert({
+          user_id: user.id,
+          ...(brandId ? { brand_id: brandId } : { restaurant_id: restaurantId }),
+          rating,
+          notes: notes.trim() || null,
+          photo_path: photoPath,
+        });
 
-      if (error) throw new Error(error.message);
+      if (error) {
+        if (photoPath) {
+          await supabase.storage.from('review-photos').remove([photoPath]);
+        }
+        throw new Error(error.message);
+      }
 
       setOpen(false);
       onSaved();
@@ -187,6 +191,24 @@ export function RateRestaurantButton({
                   value={notes}
                   onChangeText={setNotes}
                 />
+
+                {photoUri ? (
+                  <View style={styles.photoRow}>
+                    <Image source={{ uri: photoUri }} style={styles.photo} />
+                    <TouchableOpacity onPress={() => setPhotoUri(null)}>
+                      <Text style={styles.removePhoto}>Remove photo</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    onPress={async () => {
+                      const uri = await pickPhoto('Photo of the place');
+                      if (uri) setPhotoUri(uri);
+                    }}
+                  >
+                    <Text style={styles.addPhoto}>+ Add a photo</Text>
+                  </TouchableOpacity>
+                )}
 
                 <TouchableOpacity
                   style={[
@@ -263,6 +285,29 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: Palette.text,
     textAlignVertical: 'top',
+    marginBottom: 16,
+  },
+  photoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginBottom: 16,
+  },
+  photo: {
+    width: 80,
+    height: 60,
+    borderRadius: 8,
+    backgroundColor: Palette.elevated,
+  },
+  removePhoto: {
+    color: Palette.textMuted,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  addPhoto: {
+    color: Palette.accent,
+    fontSize: 15,
+    fontWeight: '600',
     marginBottom: 16,
   },
   saveButton: {

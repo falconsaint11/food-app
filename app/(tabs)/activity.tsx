@@ -154,6 +154,17 @@ export default function ActivityScreen() {
       return;
     }
 
+    if (item.visitId) {
+      router.push({
+        pathname: '/visit/[id]',
+        params: {
+          id: item.visitId,
+        },
+      });
+
+      return;
+    }
+
     if (item.reviewId) {
       router.push({
         pathname: '/review/[id]',
@@ -272,10 +283,14 @@ export default function ActivityScreen() {
     if (
       item.type === 'reaction'
     ) {
-      return `reacted ${item.reaction} to your review of ${item.dishName}.`;
+      return item.visitId
+        ? `liked your rating of ${item.dishName}.`
+        : `reacted ${item.reaction} to your review of ${item.dishName}.`;
     }
 
-    return `commented on your review of ${item.dishName}.`;
+    return item.visitId
+      ? `commented on your rating of ${item.dishName}.`
+      : `commented on your review of ${item.dishName}.`;
   }
 
   function getNotificationIcon(

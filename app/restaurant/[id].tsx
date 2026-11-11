@@ -1488,8 +1488,8 @@ export default function RestaurantDetailScreen() {
                     style={styles.reviewCard}
                     onPress={() =>
                       router.push({
-                        pathname: '/user/[id]',
-                        params: { id: note.user_id },
+                        pathname: '/visit/[id]',
+                        params: { id: note.id },
                       })
                     }
                   >

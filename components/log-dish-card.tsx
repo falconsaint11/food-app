@@ -1,7 +1,5 @@
-import * as ImagePicker from "expo-image-picker";
 import { useEffect, useRef, useState } from "react";
 import {
-  Alert,
   Image,
   Keyboard,
   StyleSheet,
@@ -13,6 +11,7 @@ import {
 
 import { StarRatingInput } from "@/components/star-rating-input";
 import { Palette } from "@/constants/theme";
+import { pickPhoto as askForPhoto } from "@/lib/pick-photo";
 import { guessDishTags, Tag } from "@/lib/tags";
 
 export type DishResult = {
@@ -33,6 +32,10 @@ export type DishResult = {
   has_choices?: boolean;
 };
 
+// A flavor picked from the chips: one on the menu, or a new one typed with
+// "+ New" (dish null).
+export type FlavorPick = { dish: DishResult | null; label: string };
+
 // One dish in a visit being logged.
 export type DishEntry = {
   key: string;
@@ -51,6 +54,12 @@ export type DishEntry = {
   // on save. For a dish not on the menu yet, `of` is null and parentName is
   // the dish, which is added first.
   newVariant: { of: string | null; label: string; parentName?: string } | null;
+
+  // Flavors after the first, for a dish that came with several (a bowl with
+  // chicken and steak). The first is matchedDish or newVariant, as when only
+  // one is picked; with more, the review goes on the plain dish and lists
+  // them all.
+  extraFlavors: FlavorPick[];
 
   rating: number;
 
@@ -71,12 +80,32 @@ export function createDishEntry(name = ""): DishEntry {
     matchedDish: null,
     variantParent: null,
     newVariant: null,
+    extraFlavors: [],
     rating: 0,
     notes: "",
     photoUri: null,
     tags: [],
     tagsTouched: false,
   };
+}
+
+// Every flavor picked on a dish with flavors, in the order picked.
+export function flavorPicks(entry: DishEntry): FlavorPick[] {
+  const parent = entry.variantParent;
+  if (!parent) return [];
+
+  const first: FlavorPick[] = entry.newVariant
+    ? [{ dish: null, label: entry.newVariant.label }]
+    : entry.matchedDish && entry.matchedDish.name_key !== parent.name_key
+      ? [
+          {
+            dish: entry.matchedDish,
+            label: entry.matchedDish.variant_label ?? entry.matchedDish.name,
+          },
+        ]
+      : [];
+
+  return [...first, ...entry.extraFlavors];
 }
 
 type LogDishCardProps = {
@@ -92,6 +121,10 @@ type LogDishCardProps = {
 
   onChange: (patch: Partial<DishEntry>) => void;
 
+  // Photos on the visit's other dishes, so one photo of the table can go on
+  // several.
+  otherPhotos: { name: string; uri: string }[];
+
   // Omitted for the only card, which can't be removed.
   onRemove?: () => void;
 
@@ -105,6 +138,7 @@ export function LogDishCard({
   onLoadVariants,
   onChange,
   onRemove,
+  otherPhotos,
   disabled,
 }: LogDishCardProps) {
   const [results, setResults] = useState<DishResult[]>([]);
@@ -155,6 +189,7 @@ export function LogDishCard({
       matchedDish: null,
       variantParent: null,
       newVariant: null,
+      extraFlavors: [],
       // Clearing the dish starts tagging over.
       ...(text.trim().length < 2 ? { tags: [], tagsTouched: false } : {}),
     });
@@ -180,6 +215,7 @@ export function LogDishCard({
       matchedDish: dish,
       variantParent: dish.has_choices ? dish : null,
       newVariant: null,
+      extraFlavors: [],
     });
     setResults([]);
     setVariants([]);
@@ -190,34 +226,80 @@ export function LogDishCard({
     }
   }
 
-  function pickVariant(variant: DishResult | null) {
+  // Saves the picked flavors: none is the plain dish, one is that flavor,
+  // several go on the plain dish together.
+  function setPicks(picks: FlavorPick[]) {
     const parent = entry.variantParent;
     if (!parent) return;
 
-    const dish = variant ?? parent;
-    onChange({ name: dish.name, matchedDish: dish, newVariant: null });
+    const [first, ...rest] = picks;
+
+    onChange({
+      name:
+        picks.length === 1
+          ? (first.dish?.name ?? `${first.label} ${parent.name}`)
+          : parent.name,
+      matchedDish: first ? first.dish : parent,
+      newVariant:
+        first && !first.dish
+          ? { of: parent.variant_of ?? parent.name_key ?? null, label: first.label }
+          : null,
+      extraFlavors: rest,
+    });
+  }
+
+  function samePick(a: FlavorPick, b: FlavorPick) {
+    return a.dish && b.dish
+      ? a.dish.name_key === b.dish.name_key
+      : !a.dish && !b.dish && a.label === b.label;
+  }
+
+  // Tapping a flavor adds or removes it; Plain clears them.
+  function toggleVariant(variant: DishResult | null) {
+    if (!variant) {
+      setPicks([]);
+      setVariantDraft(null);
+      return;
+    }
+
+    const pick = {
+      dish: variant,
+      label: variant.variant_label ?? variant.name,
+    };
+    const picks = flavorPicks(entry);
+
+    setPicks(
+      picks.some((other) => samePick(other, pick))
+        ? picks.filter((other) => !samePick(other, pick))
+        : [...picks, pick],
+    );
     setVariantDraft(null);
   }
 
   function startFirstVariant() {
     if (!entry.matchedDish) return;
 
-    onChange({ variantParent: entry.matchedDish });
+    onChange({ variantParent: entry.matchedDish, extraFlavors: [] });
     setVariants([]);
     setVariantDraft("");
   }
 
   function addVariant() {
-    const parent = entry.variantParent;
     const label = variantDraft?.trim();
-    if (!parent?.name_key || !label) return;
+    if (!entry.variantParent || !label) return;
 
-    onChange({
-      name: `${label} ${parent.name}`,
-      matchedDish: null,
-      newVariant: { of: parent.name_key, label },
-    });
+    const picks = flavorPicks(entry);
+
+    if (!picks.some((pick) => pick.label.toLowerCase() === label.toLowerCase())) {
+      setPicks([...picks, { dish: null, label }]);
+    }
     setVariantDraft(null);
+  }
+
+  function removeNewFlavor(label: string) {
+    setPicks(
+      flavorPicks(entry).filter((pick) => pick.dish || pick.label !== label),
+    );
   }
 
   function addNewDishFlavor() {
@@ -249,49 +331,12 @@ export function LogDishCard({
     });
   }
 
-  // Camera or library, whichever they want.
-  function pickPhoto() {
-    Alert.alert("Add a photo", undefined, [
-      { text: "Take photo", onPress: () => choosePhoto("camera") },
-      { text: "Choose from library", onPress: () => choosePhoto("library") },
-      { text: "Cancel", style: "cancel" },
-    ]);
+  async function pickPhoto() {
+    const uri = await askForPhoto();
+    if (uri) onChange({ photoUri: uri });
   }
 
-  async function choosePhoto(source: "camera" | "library") {
-    const permission =
-      source === "camera"
-        ? await ImagePicker.requestCameraPermissionsAsync()
-        : await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-    if (!permission.granted) {
-      Alert.alert(
-        source === "camera"
-          ? "Camera permission needed"
-          : "Photo permission needed",
-        source === "camera"
-          ? "Allow camera access to take a photo for your review."
-          : "Allow photo access to add a photo to your review.",
-      );
-
-      return;
-    }
-
-    const options: ImagePicker.ImagePickerOptions = {
-      mediaTypes: ["images"],
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
-    };
-    const result =
-      source === "camera"
-        ? await ImagePicker.launchCameraAsync(options)
-        : await ImagePicker.launchImageLibraryAsync(options);
-
-    if (!result.canceled) {
-      onChange({ photoUri: result.assets[0].uri });
-    }
-  }
+  const picks = flavorPicks(entry);
 
   const detailCount =
     (entry.notes.trim() ? 1 : 0) +
@@ -393,20 +438,22 @@ export function LogDishCard({
 
       {entry.variantParent ? (
         <View style={styles.variantBox}>
-          <Text style={styles.variantPrompt}>Which flavor or type?</Text>
+          <Text style={styles.variantPrompt}>
+            Which flavor or type?{" "}
+            <Text style={styles.variantHint}>Pick more than one if it had a few</Text>
+          </Text>
 
           <View style={styles.tagChips}>
             {[null, ...variants].map((variant) => {
-              const selected =
-                !entry.newVariant &&
-                entry.matchedDish?.name_key ===
-                  (variant ?? entry.variantParent)?.name_key;
+              const selected = variant
+                ? picks.some((pick) => pick.dish?.name_key === variant.name_key)
+                : picks.length === 0;
 
               return (
                 <TouchableOpacity
                   key={variant?.id ?? "plain"}
                   style={[styles.tagChip, selected && styles.tagChipSelected]}
-                  onPress={() => pickVariant(variant)}
+                  onPress={() => toggleVariant(variant)}
                   disabled={disabled}
                 >
                   <Text
@@ -421,13 +468,20 @@ export function LogDishCard({
               );
             })}
 
-            {entry.newVariant ? (
-              <View style={[styles.tagChip, styles.tagChipSelected]}>
-                <Text style={[styles.tagChipText, styles.tagChipTextSelected]}>
-                  {entry.newVariant.label}
-                </Text>
-              </View>
-            ) : null}
+            {picks
+              .filter((pick) => !pick.dish)
+              .map((pick) => (
+                <TouchableOpacity
+                  key={`new-${pick.label}`}
+                  style={[styles.tagChip, styles.tagChipSelected]}
+                  onPress={() => removeNewFlavor(pick.label)}
+                  disabled={disabled}
+                >
+                  <Text style={[styles.tagChipText, styles.tagChipTextSelected]}>
+                    {pick.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
 
             {variantDraft === null ? (
               <TouchableOpacity
@@ -507,9 +561,31 @@ export function LogDishCard({
               </View>
             </View>
           ) : (
-            <TouchableOpacity style={styles.addPhotoButton} onPress={pickPhoto}>
-              <Text style={styles.addPhotoText}>+ Add photo</Text>
-            </TouchableOpacity>
+            <View>
+              <TouchableOpacity
+                style={styles.addPhotoButton}
+                onPress={pickPhoto}
+              >
+                <Text style={styles.addPhotoText}>+ Add photo</Text>
+              </TouchableOpacity>
+
+              {/* One photo of the whole table can go on every dish in it. */}
+              {otherPhotos.map((photo) => (
+                <TouchableOpacity
+                  key={photo.uri}
+                  style={styles.sharePhotoRow}
+                  onPress={() => onChange({ photoUri: photo.uri })}
+                >
+                  <Image
+                    source={{ uri: photo.uri }}
+                    style={styles.sharePhotoThumb}
+                  />
+                  <Text style={styles.sharePhotoText}>
+                    Use the photo from {photo.name || "another dish"}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           )}
 
           {allTags.length > 0 ? (
@@ -555,6 +631,44 @@ const styles = StyleSheet.create({
     color: Palette.textSecondary,
 
     marginBottom: 6,
+  },
+
+  variantHint: {
+    fontSize: 12,
+
+    fontWeight: "400",
+
+    color: Palette.textMuted,
+  },
+
+  sharePhotoRow: {
+    flexDirection: "row",
+
+    alignItems: "center",
+
+    gap: 10,
+
+    marginTop: 10,
+  },
+
+  sharePhotoThumb: {
+    width: 40,
+
+    height: 30,
+
+    borderRadius: 6,
+
+    backgroundColor: Palette.elevated,
+  },
+
+  sharePhotoText: {
+    flex: 1,
+
+    fontSize: 14,
+
+    fontWeight: "600",
+
+    color: Palette.accent,
   },
 
   variantInputRow: {

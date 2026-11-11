@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -24,8 +25,10 @@ import {
   createDishEntry,
   DishEntry,
   DishResult,
+  flavorPicks,
   LogDishCard,
 } from "@/components/log-dish-card";
+import { pickPhoto } from "@/lib/pick-photo";
 import { StarRatingInput } from "@/components/star-rating-input";
 import { useIsCurator } from "@/lib/admin";
 import { getBrandLocationIds } from "@/lib/brands";
@@ -204,6 +207,9 @@ export default function LogScreen() {
 
   const [searchLongitude, setSearchLongitude] = useState<number | null>(null);
 
+  // The Google list holds the longer nearby search, so don't offer it again.
+  const [showedMoreNearby, setShowedMoreNearby] = useState(false);
+
   // Every saved location of the selected restaurant's brand, so dish
   // suggestions cover the whole chain's menu.
   const [menuLocationIds, setMenuLocationIds] = useState<string[]>([]);
@@ -222,6 +228,11 @@ export default function LogScreen() {
   const [restaurantRating, setRestaurantRating] = useState(0);
 
   const [restaurantNotes, setRestaurantNotes] = useState("");
+
+  // A photo of the place with the restaurant rating.
+  const [restaurantPhotoUri, setRestaurantPhotoUri] = useState<string | null>(
+    null,
+  );
 
   // When the meal was, for logging past visits. Today by default.
   const [dateEaten, setDateEaten] = useState(() => new Date());
@@ -349,6 +360,46 @@ export default function LogScreen() {
     );
   }
 
+  // Google's quick search lists only 5 places, so a chain's other nearby
+  // locations (one in a mall food court) can be missing. This asks for up to
+  // 20, nearest first.
+  async function showMoreNearby() {
+    const trimmed = restaurantName.trim();
+    if (trimmed.length < 3 || searchLatitude === null || searchLongitude === null) {
+      return;
+    }
+
+    const version = searchVersion.current;
+    setGoogleLoading(true);
+
+    const { data, error } = await supabase.functions.invoke(
+      "google-places-autocomplete",
+      {
+        body: {
+          input: trimmed,
+          latitude: searchLatitude,
+          longitude: searchLongitude,
+          nearby: true,
+        },
+      },
+    );
+
+    if (version !== searchVersion.current) return;
+
+    setGoogleLoading(false);
+
+    if (error) {
+      console.log("Nearby search error:", error.message);
+      Alert.alert("Search error", "Couldn't load more places. Try again.");
+      return;
+    }
+
+    if (Array.isArray(data?.suggestions) && data.suggestions.length > 0) {
+      setGoogleResults(data.suggestions);
+      setShowedMoreNearby(true);
+    }
+  }
+
   async function searchGooglePlaces(text: string) {
     const trimmed = text.trim();
 
@@ -437,6 +488,8 @@ export default function LogScreen() {
     clearRestaurant();
 
     const version = ++searchVersion.current;
+
+    setShowedMoreNearby(false);
 
     const trimmed = text.trim();
 
@@ -1004,6 +1057,17 @@ export default function LogScreen() {
     restaurantId: string,
     tagFriends: boolean,
   ) {
+    let photoPath: string | null = null;
+
+    if (restaurantPhotoUri) {
+      try {
+        photoPath = await uploadPhoto(restaurantPhotoUri, userId);
+      } catch (error) {
+        console.log("Restaurant photo error:", error);
+        return { error: null, tagsFailed: false, photoFailed: true };
+      }
+    }
+
     const { data, error } = await supabase
       .from("restaurant_ratings")
       .insert({
@@ -1011,6 +1075,7 @@ export default function LogScreen() {
         restaurant_id: restaurantId,
         rating: restaurantRating > 0 ? restaurantRating : null,
         notes: restaurantNotes.trim() || null,
+        photo_path: photoPath,
         // A past visit is dated at noon that day; today's is right now.
         ...(toDateKey(dateEaten) !== toDateKey(new Date())
           ? {
@@ -1028,7 +1093,10 @@ export default function LogScreen() {
 
     if (error) {
       console.log("Visit error:", error.message);
-      return { error: error.message, tagsFailed: false };
+      if (photoPath) {
+        await supabase.storage.from("review-photos").remove([photoPath]);
+      }
+      return { error: error.message, tagsFailed: false, photoFailed: false };
     }
 
     if (tagFriends && selectedFriends.length > 0) {
@@ -1043,11 +1111,11 @@ export default function LogScreen() {
 
       if (tagsError) {
         console.log("Restaurant tags error:", tagsError.message);
-        return { error: null, tagsFailed: true };
+        return { error: null, tagsFailed: true, photoFailed: false };
       }
     }
 
-    return { error: null, tagsFailed: false };
+    return { error: null, tagsFailed: false, photoFailed: false };
   }
 
   // Saves one dish review plus its friend tags and dish tag votes. Throws if
@@ -1058,12 +1126,39 @@ export default function LogScreen() {
     dish: DishEntry,
     match: DishResult | null,
   ) {
-    const dishId = await findOrCreateDish(
-      restaurantId,
-      dish.name.trim(),
-      match,
-      dish.newVariant,
-    );
+    // Several flavors: the review goes on the plain dish and lists them.
+    const parent = dish.variantParent;
+    const picks = flavorPicks(dish);
+    const several = !!parent && picks.length > 1;
+
+    const dishId = several
+      ? await findOrCreateDish(restaurantId, parent.name, parent, null)
+      : await findOrCreateDish(
+          restaurantId,
+          dish.name.trim(),
+          match,
+          dish.newVariant,
+        );
+
+    const flavorIds: string[] = [];
+
+    if (several) {
+      for (const pick of picks) {
+        const flavorId = await findOrCreateDish(
+          restaurantId,
+          pick.dish?.name ?? `${pick.label} ${parent.name}`,
+          pick.dish,
+          pick.dish
+            ? null
+            : {
+                of: parent.variant_of ?? parent.name_key ?? null,
+                label: pick.label,
+              },
+        );
+
+        if (!flavorIds.includes(flavorId)) flavorIds.push(flavorId);
+      }
+    }
 
     const photoPath = dish.photoUri
       ? await uploadPhoto(dish.photoUri, userId)
@@ -1091,6 +1186,21 @@ export default function LogScreen() {
     }
 
     const failedExtras: string[] = [];
+
+    if (flavorIds.length > 0) {
+      const { error: flavorsError } = await supabase
+        .from("review_flavors")
+        .insert(
+          flavorIds.map((flavorId) => ({
+            review_id: createdReview.id,
+            dish_id: flavorId,
+          })),
+        );
+      if (flavorsError) {
+        console.log("Review flavors error:", flavorsError.message);
+        failedExtras.push("flavors");
+      }
+    }
 
     if (selectedFriends.length > 0) {
       const { error: tagsError } = await supabase.from("review_tags").insert(
@@ -1238,6 +1348,8 @@ export default function LogScreen() {
         }
 
         if (visit.tagsFailed) failedExtras.add("friend tags");
+
+        if (visit.photoFailed) failedExtras.add("the restaurant photo");
       }
 
       if (failedDishes.length > 0) {
@@ -1292,6 +1404,8 @@ export default function LogScreen() {
     setRestaurantRating(0);
 
     setRestaurantNotes("");
+
+    setRestaurantPhotoUri(null);
 
     setDateEaten(new Date());
 
@@ -1572,6 +1686,20 @@ export default function LogScreen() {
                     </TouchableOpacity>
                   );
                 })}
+
+                {!showedMoreNearby &&
+                !googleLoading &&
+                searchLatitude !== null &&
+                searchLongitude !== null ? (
+                  <TouchableOpacity
+                    style={styles.resultItem}
+                    onPress={showMoreNearby}
+                  >
+                    <Text style={styles.moreNearbyText}>
+                      Not here? Show more locations near you
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
             ) : null}
 
@@ -1715,6 +1843,15 @@ export default function LogScreen() {
             onSearch={searchMenu}
             onLoadVariants={loadVariants}
             onChange={(patch) => updateDish(dish.key, patch)}
+            otherPhotos={dishes.flatMap((other) =>
+              other.key !== dish.key &&
+              other.photoUri &&
+              !dishes
+                .slice(0, dishes.indexOf(other))
+                .some((earlier) => earlier.photoUri === other.photoUri)
+                ? [{ name: other.name.trim(), uri: other.photoUri }]
+                : [],
+            )}
             onRemove={dishes.length > 1 ? () => removeDish(dish.key) : undefined}
             disabled={loading}
           />
@@ -1761,6 +1898,46 @@ export default function LogScreen() {
             onChangeText={setRestaurantNotes}
             editable={!loading}
           />
+        ) : null}
+
+        {restaurantRating > 0 || restaurantNotes || restaurantPhotoUri ? (
+          restaurantPhotoUri ? (
+            <View style={styles.restaurantPhotoBox}>
+              <Image
+                source={{ uri: restaurantPhotoUri }}
+                style={styles.restaurantPhoto}
+              />
+              <View style={styles.restaurantPhotoActions}>
+                <TouchableOpacity
+                  onPress={async () => {
+                    const uri = await pickPhoto("Photo of the place");
+                    if (uri) setRestaurantPhotoUri(uri);
+                  }}
+                  disabled={loading}
+                >
+                  <Text style={styles.restaurantPhotoLink}>Change photo</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setRestaurantPhotoUri(null)}
+                  disabled={loading}
+                >
+                  <Text style={styles.clearRatingText}>Remove</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <TouchableOpacity
+              onPress={async () => {
+                const uri = await pickPhoto("Photo of the place");
+                if (uri) setRestaurantPhotoUri(uri);
+              }}
+              disabled={loading}
+            >
+              <Text style={styles.restaurantPhotoLink}>
+                + Add a photo of the place
+              </Text>
+            </TouchableOpacity>
+          )
         ) : null}
 
         <TouchableOpacity onPress={() => setShowFriends((open) => !open)}>
@@ -2158,6 +2335,46 @@ const styles = StyleSheet.create({
     color: Palette.textMuted,
 
     fontWeight: "600",
+  },
+
+  moreNearbyText: {
+    fontSize: 15,
+
+    fontWeight: "600",
+
+    color: Palette.accent,
+  },
+
+  restaurantPhotoBox: {
+    marginBottom: 16,
+  },
+
+  restaurantPhoto: {
+    width: "100%",
+
+    aspectRatio: 4 / 3,
+
+    borderRadius: 12,
+
+    backgroundColor: Palette.elevated,
+  },
+
+  restaurantPhotoActions: {
+    flexDirection: "row",
+
+    justifyContent: "space-between",
+
+    marginTop: 8,
+  },
+
+  restaurantPhotoLink: {
+    fontSize: 15,
+
+    fontWeight: "600",
+
+    color: Palette.accent,
+
+    marginBottom: 16,
   },
 
   restaurantNotesInput: {

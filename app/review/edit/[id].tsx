@@ -80,9 +80,11 @@ export default function EditReviewScreen() {
   // The reviewed dish, its flavors, and the one picked here.
   const [reviewDish, setReviewDish] = useState<ReviewDish | null>(null);
   const [flavors, setFlavors] = useState<FlavorChoice[]>([]);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  // A new flavor typed in with "+ New", created on save.
-  const [newFlavor, setNewFlavor] = useState<string | null>(null);
+  // The flavors picked (name keys); none is the plain dish, several go on
+  // the plain dish together.
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  // New flavors typed in with "+ New", created on save.
+  const [newFlavors, setNewFlavors] = useState<string[]>([]);
   const [flavorDraft, setFlavorDraft] = useState<string | null>(null);
 
   useEffect(() => {
@@ -122,6 +124,9 @@ export default function EditReviewScreen() {
         review_text,
         date_eaten,
         photo_path,
+        review_flavors (
+          dishes (name_key)
+        ),
         dishes (
           id,
           name,
@@ -187,9 +192,21 @@ export default function EditReviewScreen() {
         'Unknown restaurant'
     );
 
+    const pickedKeys = (
+      (data.review_flavors ?? []) as unknown as {
+        dishes: { name_key: string } | null;
+      }[]
+    ).flatMap((row) => (row.dishes ? [row.dishes.name_key] : []));
+
     setReviewDish(dish);
-    setSelectedKey(dish?.name_key ?? null);
-    setNewFlavor(null);
+    setSelectedKeys(
+      pickedKeys.length > 0
+        ? [...new Set(pickedKeys)]
+        : dish?.variant_of
+          ? [dish.name_key]
+          : []
+    );
+    setNewFlavors([]);
     setFlavorDraft(null);
 
     if (dish) {
@@ -250,22 +267,33 @@ export default function EditReviewScreen() {
       (flavor) => flavor.label?.toLowerCase() === label.toLowerCase()
     );
 
-    if (existing) {
-      setSelectedKey(existing.nameKey);
-      setNewFlavor(null);
-    } else {
-      setNewFlavor(label);
-      setSelectedKey(null);
+    if (existing?.label === null) {
+      setSelectedKeys([]);
+      setNewFlavors([]);
+    } else if (existing) {
+      setSelectedKeys((current) =>
+        current.includes(existing.nameKey)
+          ? current
+          : [...current, existing.nameKey]
+      );
+    } else if (
+      !newFlavors.some((flavor) => flavor.toLowerCase() === label.toLowerCase())
+    ) {
+      setNewFlavors((current) => [...current, label]);
     }
 
     setFlavorDraft(null);
   }
 
-  // The dish the review should be of after saving: the same one, another
-  // flavor (added at this location if it's only at another one), or a new
-  // flavor.
-  async function resolveFlavorDish(): Promise<string | null> {
-    if (!reviewDish) return null;
+  // The dish the review should be of after saving, and the flavors it
+  // lists: the plain dish, one flavor (added at this location if it's only at
+  // another one), or the plain dish with several.
+  async function resolveFlavorDishes(): Promise<{
+    dishId: string;
+    flavorIds: string[];
+  } | null> {
+    // Leaves the dish alone until its flavors have loaded.
+    if (!reviewDish || flavors.length === 0) return null;
 
     const rootKey = reviewDish.variant_of ?? reviewDish.name_key;
     const root = flavors.find((flavor) => flavor.label === null);
@@ -275,51 +303,63 @@ export default function EditReviewScreen() {
         ? reviewDish.name.replace(reviewDish.variant_label, '').trim()
         : reviewDish.name);
 
-    if (newFlavor) {
+    // This location's row of a dish or flavor, added if it's missing.
+    async function rowFor(
+      nameKey: string | null,
+      name: string,
+      label: string | null
+    ) {
+      if (nameKey === reviewDish!.name_key) return reviewDish!.id;
+
+      const existing = flavors.find((flavor) => flavor.nameKey === nameKey);
+      if (existing?.rowHere) return existing.rowHere;
+
       const { data, error } = await supabase
         .from('dishes')
         .insert({
-          restaurant_id: reviewDish.restaurant_id,
-          name: `${newFlavor} ${rootName}`,
-          variant_of: rootKey,
-          variant_label: newFlavor,
+          restaurant_id: reviewDish!.restaurant_id,
+          name,
+          variant_of: label ? rootKey : null,
+          variant_label: label,
         })
         .select('id')
         .single();
 
       if (error || !data) {
-        throw new Error(error?.message ?? 'Could not add the flavor.');
+        throw new Error(error?.message ?? 'Could not save the flavor.');
       }
 
       return data.id as string;
     }
 
-    const choice = flavors.find((flavor) => flavor.nameKey === selectedKey);
+    const picks = [
+      ...flavors
+        .filter((flavor) => flavor.label && selectedKeys.includes(flavor.nameKey))
+        .map((flavor) => ({
+          nameKey: flavor.nameKey,
+          name: flavor.name,
+          label: flavor.label!,
+        })),
+      ...newFlavors.map((label) => ({
+        nameKey: null,
+        name: `${label} ${rootName}`,
+        label,
+      })),
+    ];
 
-    if (!choice || choice.nameKey === reviewDish.name_key) {
-      return reviewDish.id;
+    const pickIds: string[] = [];
+    for (const pick of picks) {
+      const pickId = await rowFor(pick.nameKey, pick.name, pick.label);
+      if (!pickIds.includes(pickId)) pickIds.push(pickId);
     }
 
-    if (choice.rowHere) {
-      return choice.rowHere;
+    if (pickIds.length === 1) {
+      return { dishId: pickIds[0], flavorIds: [] };
     }
 
-    const { data, error } = await supabase
-      .from('dishes')
-      .insert({
-        restaurant_id: reviewDish.restaurant_id,
-        name: choice.name,
-        variant_of: choice.label ? rootKey : null,
-        variant_label: choice.label,
-      })
-      .select('id')
-      .single();
+    const rootId = await rowFor(root?.nameKey ?? rootKey, rootName, null);
 
-    if (error || !data) {
-      throw new Error(error?.message ?? 'Could not switch the flavor.');
-    }
-
-    return data.id as string;
+    return { dishId: rootId, flavorIds: pickIds };
   }
 
   function getPhotoUrl(path: string) {
@@ -519,8 +559,8 @@ export default function EditReviewScreen() {
       const trimmedReview =
         reviewText.trim();
 
-      const flavorDishId =
-        await resolveFlavorDish();
+      const flavorDishes =
+        await resolveFlavorDishes();
 
       const { error } =
         await supabase
@@ -535,8 +575,8 @@ export default function EditReviewScreen() {
               dateEaten,
             photo_path:
               finalPhotoPath,
-            ...(flavorDishId
-              ? { dish_id: flavorDishId }
+            ...(flavorDishes
+              ? { dish_id: flavorDishes.dishId }
               : {}),
           })
           .eq('id', id)
@@ -559,6 +599,29 @@ export default function EditReviewScreen() {
         throw new Error(
           error.message
         );
+      }
+
+      // The flavors listed on the review are replaced all at once.
+      if (flavorDishes) {
+        const { error: clearError } = await supabase
+          .from('review_flavors')
+          .delete()
+          .eq('review_id', id);
+
+        if (clearError) throw new Error(clearError.message);
+
+        if (flavorDishes.flavorIds.length > 0) {
+          const { error: flavorsError } = await supabase
+            .from('review_flavors')
+            .insert(
+              flavorDishes.flavorIds.map((flavorId) => ({
+                review_id: id,
+                dish_id: flavorId,
+              }))
+            );
+
+          if (flavorsError) throw new Error(flavorsError.message);
+        }
       }
 
       const replacingPhoto =
@@ -598,14 +661,24 @@ export default function EditReviewScreen() {
   }
 
   // The header follows the flavor picked below.
-  const selectedFlavor = flavors.find(
-    (flavor) => flavor.nameKey === selectedKey
-  );
+  const pickedLabels = [
+    ...flavors
+      .filter((flavor) => flavor.label && selectedKeys.includes(flavor.nameKey))
+      .map((flavor) => flavor.label!),
+    ...newFlavors,
+  ];
   const rootFlavorName =
     flavors.find((flavor) => flavor.label === null)?.name ?? dishName;
-  const displayedDishName = newFlavor
-    ? `${newFlavor} ${rootFlavorName}`
-    : (selectedFlavor?.name ?? dishName);
+  const displayedDishName =
+    flavors.length === 0 && newFlavors.length === 0
+      ? dishName
+      : pickedLabels.length === 0
+        ? rootFlavorName
+        : pickedLabels.length === 1
+          ? (flavors.find(
+              (flavor) => flavor.label === pickedLabels[0]
+            )?.name ?? `${pickedLabels[0]} ${rootFlavorName}`)
+          : `${rootFlavorName} · ${pickedLabels.join(', ')}`;
 
   const displayedPhotoUri =
     newPhotoUri
@@ -703,10 +776,15 @@ export default function EditReviewScreen() {
         {reviewDish ? (
           <View style={styles.section}>
             <Text style={styles.label}>Flavor or type</Text>
+            <Text style={styles.flavorHint}>
+              Pick more than one if it had a few.
+            </Text>
 
             <View style={styles.ratingGrid}>
               {flavors.map((flavor) => {
-                const selected = !newFlavor && selectedKey === flavor.nameKey;
+                const selected = flavor.label
+                  ? selectedKeys.includes(flavor.nameKey)
+                  : selectedKeys.length === 0 && newFlavors.length === 0;
 
                 return (
                   <TouchableOpacity
@@ -716,8 +794,16 @@ export default function EditReviewScreen() {
                       selected && styles.ratingButtonSelected,
                     ]}
                     onPress={() => {
-                      setSelectedKey(flavor.nameKey);
-                      setNewFlavor(null);
+                      if (!flavor.label) {
+                        setSelectedKeys([]);
+                        setNewFlavors([]);
+                        return;
+                      }
+                      setSelectedKeys((current) =>
+                        current.includes(flavor.nameKey)
+                          ? current.filter((key) => key !== flavor.nameKey)
+                          : [...current, flavor.nameKey]
+                      );
                     }}
                   >
                     <Text
@@ -732,18 +818,26 @@ export default function EditReviewScreen() {
                 );
               })}
 
-              {newFlavor ? (
-                <View style={[styles.ratingButton, styles.ratingButtonSelected]}>
+              {newFlavors.map((flavor) => (
+                <TouchableOpacity
+                  key={`new-${flavor}`}
+                  style={[styles.ratingButton, styles.ratingButtonSelected]}
+                  onPress={() =>
+                    setNewFlavors((current) =>
+                      current.filter((other) => other !== flavor)
+                    )
+                  }
+                >
                   <Text
                     style={[
                       styles.ratingButtonText,
                       styles.ratingButtonTextSelected,
                     ]}
                   >
-                    {newFlavor}
+                    {flavor}
                   </Text>
-                </View>
-              ) : null}
+                </TouchableOpacity>
+              ))}
 
               {flavorDraft === null ? (
                 <TouchableOpacity
@@ -1033,6 +1127,12 @@ const styles = StyleSheet.create({
   },
   ratingButtonTextSelected: {
     color: Palette.text,
+  },
+  flavorHint: {
+    fontSize: 13,
+    color: Palette.textMuted,
+    marginTop: -4,
+    marginBottom: 10,
   },
   flavorInputRow: {
     flexDirection: 'row',

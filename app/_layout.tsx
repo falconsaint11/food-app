@@ -180,6 +180,7 @@ export default function RootLayout() {
         />
         <Stack.Screen name="dish/[id]" options={{ title: "" }} />
         <Stack.Screen name="review/[id]" options={{ title: "Review" }} />
+        <Stack.Screen name="visit/[id]" options={{ title: "Restaurant Rating" }} />
         <Stack.Screen
           name="review/edit/[id]"
           options={{ title: "Edit Review" }}

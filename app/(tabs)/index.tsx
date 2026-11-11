@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { Palette } from "@/constants/theme";
 import { withFlag } from "@/lib/countries";
+import { withFlavors, type ReviewFlavorRow } from "@/lib/dishes";
 type ReactionType = "😂" | "🔥" | "🤤" | "❤️";
 type FeedItem = {
   id: string;
@@ -49,6 +50,7 @@ type FeedItem = {
   review_comments: {
     id: string;
   }[];
+  review_flavors: ReviewFlavorRow[];
 };
 // A rating of a whole restaurant, shown in the feed next to dish reviews.
 type RestaurantFeedItem = {
@@ -63,6 +65,9 @@ type RestaurantFeedItem = {
   city: string | null;
   profiles: FeedItem["profiles"];
   tagged: { id: string; username: string }[];
+  photoPath: string | null;
+  likeUserIds: string[];
+  commentCount: number;
 };
 type FeedEntry =
   | { kind: "dish"; at: string; item: FeedItem }
@@ -140,6 +145,9 @@ export default function HomeScreen() {
         ),
         review_comments (
           id
+        ),
+        review_flavors (
+          dishes (name, variant_label)
         )
       `,
       )
@@ -220,6 +228,40 @@ export default function HomeScreen() {
       Alert.alert("Like error", error.message);
     }
   }
+  // Like or unlike a restaurant rating from the feed, the same way.
+  async function toggleRestaurantLike(item: RestaurantFeedItem) {
+    if (!currentUserId || likeSaving.includes(item.id)) return;
+    const userId = currentUserId;
+    const liked = item.likeUserIds.includes(userId);
+    const setLikes = (likeUserIds: string[]) =>
+      setFeed((current) =>
+        current.map((entry) =>
+          entry.kind === "restaurant" && entry.item.id === item.id
+            ? { ...entry, item: { ...entry.item, likeUserIds } }
+            : entry,
+        ),
+      );
+    setLikes(
+      liked
+        ? item.likeUserIds.filter((id) => id !== userId)
+        : [...item.likeUserIds, userId],
+    );
+    setLikeSaving((current) => [...current, item.id]);
+    const { error } = liked
+      ? await supabase
+          .from("restaurant_rating_likes")
+          .delete()
+          .eq("restaurant_rating_id", item.id)
+          .eq("user_id", userId)
+      : await supabase
+          .from("restaurant_rating_likes")
+          .insert({ restaurant_rating_id: item.id, user_id: userId });
+    setLikeSaving((current) => current.filter((id) => id !== item.id));
+    if (error) {
+      setLikes(item.likeUserIds);
+      Alert.alert("Like error", error.message);
+    }
+  }
   // Restaurant ratings by you and the people you follow. Brand-wide ratings
   // have no location, so they link to any of the brand's.
   async function loadRestaurantFeed(
@@ -236,7 +278,10 @@ export default function HomeScreen() {
         visited_at,
         restaurant_id,
         brand_id,
-        restaurants (id, name, city, country_code, brands (name))
+        photo_path,
+        restaurants (id, name, city, country_code, brands (name)),
+        restaurant_rating_likes (user_id),
+        restaurant_rating_comments (id)
       `,
       )
       .in("user_id", userIds)
@@ -255,6 +300,7 @@ export default function HomeScreen() {
       visited_at: string;
       restaurant_id: string | null;
       brand_id: string | null;
+      photo_path: string | null;
       restaurants: {
         id: string;
         name: string;
@@ -262,6 +308,8 @@ export default function HomeScreen() {
         country_code: string | null;
         brands: { name: string } | null;
       } | null;
+      restaurant_rating_likes: { user_id: string }[] | null;
+      restaurant_rating_comments: { id: string }[] | null;
     };
     const rows = (data ?? []) as unknown as Row[];
     // Friends tagged on visits logged without dishes.
@@ -338,6 +386,11 @@ export default function HomeScreen() {
           city: row.restaurant_id ? (row.restaurants?.city ?? null) : null,
           countryCode: row.restaurants?.country_code ?? null,
           profiles: profileById.get(row.user_id) ?? null,
+          photoPath: row.photo_path,
+          likeUserIds: (row.restaurant_rating_likes ?? []).map(
+            (like) => like.user_id,
+          ),
+          commentCount: (row.restaurant_rating_comments ?? []).length,
           tagged: tags
             .filter((tag) => tag.restaurant_rating_id === row.id)
             .flatMap((tag) => {
@@ -439,6 +492,9 @@ export default function HomeScreen() {
         pathname: "/restaurant/[id]",
         params: { id: item.restaurantId },
       });
+    const openVisit = () =>
+      router.push({ pathname: "/visit/[id]", params: { id: item.id } });
+    const liked = !!currentUserId && item.likeUserIds.includes(currentUserId);
     return (
       <View key={`restaurant-${item.id}`} style={styles.card}>
         {renderUserRow(
@@ -448,7 +504,9 @@ export default function HomeScreen() {
         )}
         <View style={styles.foodRow}>
           <View style={styles.foodInfo}>
-            <Text style={styles.restaurantLabel}>Rated the restaurant</Text>
+            <TouchableOpacity onPress={openVisit}>
+              <Text style={styles.restaurantLabel}>Rated the restaurant</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={openRestaurant}>
               <Text style={styles.dishName}>
                 {withFlag(item.restaurantName, item.countryCode)}
@@ -460,6 +518,15 @@ export default function HomeScreen() {
             {formatRating(item.rating, isPremium)}★
           </Text>
         </View>
+        {item.photoPath ? (
+          <TouchableOpacity activeOpacity={0.85} onPress={openVisit}>
+            <Image
+              source={{ uri: getPhotoUrl(item.photoPath) }}
+              style={styles.reviewPhoto}
+              resizeMode="cover"
+            />
+          </TouchableOpacity>
+        ) : null}
         {item.notes ? <Text style={styles.review}>{item.notes}</Text> : null}
         {item.tagged.length > 0 ? (
           <View style={styles.wentWithRow}>
@@ -481,6 +548,34 @@ export default function HomeScreen() {
             ))}
           </View>
         ) : null}
+        <View style={styles.engagementRow}>
+          <TouchableOpacity
+            style={styles.engagementItem}
+            onPress={() => toggleRestaurantLike(item)}
+            hitSlop={10}
+            accessibilityLabel={liked ? "Unlike" : "Like"}
+          >
+            <Text style={[styles.heart, liked && styles.heartOn]}>
+              {liked ? "♥" : "♡"}
+            </Text>
+            {item.likeUserIds.length > 0 ? (
+              <Text style={styles.engagementText}>
+                {item.likeUserIds.length}
+              </Text>
+            ) : null}
+          </TouchableOpacity>
+          {item.commentCount > 0 ? (
+            <Text style={styles.commentCount}>
+              {item.commentCount}{" "}
+              {item.commentCount === 1 ? "comment" : "comments"}
+            </Text>
+          ) : null}
+        </View>
+        <TouchableOpacity onPress={openVisit}>
+          <Text style={styles.viewReview}>
+            {item.commentCount > 0 ? "View comments" : "Add a comment"}
+          </Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -546,7 +641,9 @@ export default function HomeScreen() {
                     }
                   >
                     <Text style={styles.dishName}>
-                      {item.dishes?.name ?? "Unknown dish"}
+                      {item.dishes
+                        ? withFlavors(item.dishes.name, item.review_flavors)
+                        : "Unknown dish"}
                     </Text>
                   </TouchableOpacity>
                   {restaurant ? (
