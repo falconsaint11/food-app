@@ -415,8 +415,6 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </View>
 
-      <ListsSection userId={profile.id} isOwner />
-
       <TouchableOpacity
         style={styles.compareButton}
         activeOpacity={0.7}
@@ -521,6 +519,9 @@ export default function ProfileScreen() {
           </View>
         )}
       </View>
+
+      <ListsSection userId={profile.id} isOwner />
+
       <RatingsChart userId={profile.id} />
 
       <View style={styles.section}>

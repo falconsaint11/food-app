@@ -1439,15 +1439,26 @@ export default function DiscoverScreen() {
             )}
 
             {renderSection(
-              'What friends are eating',
-              null,
-              friendReviews.map(reviewCard)
-            )}
-
-            {renderSection(
               'Popular this week',
               'The posts people are loving',
               popularReviews.map(popularCard)
+            )}
+
+            {friendReviews.length > 0 ? (
+              renderSection(
+                'What friends are eating',
+                'From people you follow',
+                friendReviews.map(reviewCard)
+              )
+            ) : (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>What friends are eating</Text>
+                <Text style={styles.sectionSubtitle}>
+                  {followingIds.length > 0
+                    ? 'The people you follow haven’t posted yet.'
+                    : 'Follow friends to see what they’re eating. Find them with People in the search above.'}
+                </Text>
+              </View>
             )}
 
             {renderRestaurantReviews()}

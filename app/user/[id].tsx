@@ -838,11 +838,6 @@ export default function UserProfileScreen() {
         </TouchableOpacity>
       </View>
 
-      <ListsSection
-        userId={id}
-        isOwner={currentUserId === id}
-      />
-
       <View
         style={styles.section}
       >
@@ -943,6 +938,11 @@ export default function UserProfileScreen() {
           </View>
         )}
       </View>
+
+      <ListsSection
+        userId={id}
+        isOwner={currentUserId === id}
+      />
 
       <RatingsChart userId={id} />
 

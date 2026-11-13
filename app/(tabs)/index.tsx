@@ -72,10 +72,67 @@ type RestaurantFeedItem = {
 type FeedEntry =
   | { kind: "dish"; at: string; item: FeedItem }
   | { kind: "restaurant"; at: string; item: RestaurantFeedItem };
+type FeedTab = "popular" | "following" | "recent";
+const FEED_TABS: { key: FeedTab; label: string }[] = [
+  { key: "popular", label: "Popular" },
+  { key: "following", label: "Following" },
+  { key: "recent", label: "Recent" },
+];
 const FEED_SIZE = 30;
+// Popular ranks this many of the latest posts by likes and comments.
+const POPULAR_POOL = 150;
+const REVIEW_SELECT = `
+  id,
+  user_id,
+  rating,
+  review_text,
+  photo_path,
+  created_at,
+  date_eaten,
+  review_tags (
+    tagged_user_id,
+    profiles:tagged_user_id (username, display_name)
+  ),
+  profiles:user_id (
+    username,
+    display_name,
+    avatar_path
+  ),
+  dishes (
+    id,
+    name,
+    restaurants (
+      id,
+      name,
+      city,
+      country_code
+    )
+  ),
+  review_reactions (
+    user_id,
+    reaction
+  ),
+  review_comments (
+    id
+  ),
+  review_flavors (
+    dishes (name, variant_label)
+  )
+`;
+function popularity(entry: FeedEntry) {
+  return entry.kind === "dish"
+    ? (entry.item.review_reactions ?? []).length +
+        (entry.item.review_comments ?? []).length
+    : entry.item.likeUserIds.length + entry.item.commentCount;
+}
 export default function HomeScreen() {
   const isPremium = useIsPremium();
-  const [feed, setFeed] = useState<FeedEntry[]>([]);
+  const [feeds, setFeeds] = useState<Record<FeedTab, FeedEntry[]>>({
+    popular: [],
+    following: [],
+    recent: [],
+  });
+  const [tab, setTab] = useState<FeedTab | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedReviews, setExpandedReviews] = useState<string[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -109,59 +166,47 @@ export default function HomeScreen() {
     }
     const followingIds = (follows ?? []).map((row) => row.following_id);
     const feedUserIds = [user.id, ...followingIds];
-    const { data, error } = await supabase
-      .from("reviews")
-      .select(
-        `
-        id,
-        user_id,
-        rating,
-        review_text,
-        photo_path,
-        created_at,
-        date_eaten,
-        review_tags (
-          tagged_user_id,
-          profiles:tagged_user_id (username, display_name)
-        ),
-        profiles:user_id (
-          username,
-          display_name,
-          avatar_path
-        ),
-        dishes (
-          id,
-          name,
-          restaurants (
-            id,
-            name,
-            city,
-            country_code
-          )
-        ),
-        review_reactions (
-          user_id,
-          reaction
-        ),
-        review_comments (
-          id
-        ),
-        review_flavors (
-          dishes (name, variant_label)
-        )
-      `,
-      )
-      .in("user_id", feedUserIds)
-      .order("created_at", {
-        ascending: false,
-      })
-      .limit(FEED_SIZE);
-    const restaurantItems = await loadRestaurantFeed(feedUserIds);
-    setLoading(false);
-    if (error) {
-      Alert.alert("Feed error", error.message);
-      return;
+    try {
+      const [following, everyone] = await Promise.all([
+        loadEntries(feedUserIds, FEED_SIZE),
+        loadEntries(null, POPULAR_POOL),
+      ]);
+      const popular = [...everyone]
+        .sort((a, b) => popularity(b) - popularity(a) || b.at.localeCompare(a.at))
+        .slice(0, FEED_SIZE);
+      setFeeds({
+        popular,
+        following,
+        recent: everyone.slice(0, FEED_SIZE),
+      });
+      // Open on Following once it has something in it, otherwise Popular.
+      setTab((current) => current ?? (following.length > 0 ? "following" : "popular"));
+    } catch (error) {
+      Alert.alert(
+        "Feed error",
+        error instanceof Error ? error.message : "Could not load the feed.",
+      );
+    } finally {
+      setLoading(false);
     }
+  }
+  // Dish reviews and restaurant ratings, newest first. A null userIds means
+  // everyone.
+  async function loadEntries(
+    userIds: string[] | null,
+    limit: number,
+  ): Promise<FeedEntry[]> {
+    let query = supabase
+      .from("reviews")
+      .select(REVIEW_SELECT)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (userIds) query = query.in("user_id", userIds);
+    const [{ data, error }, restaurantItems] = await Promise.all([
+      query,
+      loadRestaurantFeed(userIds, limit),
+    ]);
+    if (error) throw new Error(error.message);
     const entries: FeedEntry[] = [
       ...((data ?? []) as unknown as FeedItem[]).map((item) => ({
         kind: "dish" as const,
@@ -175,7 +220,15 @@ export default function HomeScreen() {
       })),
     ];
     entries.sort((a, b) => b.at.localeCompare(a.at));
-    setFeed(entries.slice(0, FEED_SIZE));
+    return entries.slice(0, limit);
+  }
+  // A post can appear in more than one tab, so likes update every tab.
+  function updateFeeds(change: (entry: FeedEntry) => FeedEntry) {
+    setFeeds((current) => ({
+      popular: current.popular.map(change),
+      following: current.following.map(change),
+      recent: current.recent.map(change),
+    }));
   }
   // Like or unlike a review right from the feed. Shows the change at once and
   // puts it back if saving fails.
@@ -190,18 +243,16 @@ export default function HomeScreen() {
         reactions: FeedItem["review_reactions"],
       ) => FeedItem["review_reactions"],
     ) =>
-      setFeed((current) =>
-        current.map((entry) =>
-          entry.kind === "dish" && entry.item.id === item.id
-            ? {
-                ...entry,
-                item: {
-                  ...entry.item,
-                  review_reactions: change(entry.item.review_reactions ?? []),
-                },
-              }
-            : entry,
-        ),
+      updateFeeds((entry) =>
+        entry.kind === "dish" && entry.item.id === item.id
+          ? {
+              ...entry,
+              item: {
+                ...entry.item,
+                review_reactions: change(entry.item.review_reactions ?? []),
+              },
+            }
+          : entry,
       );
     const unlike = (reactions: FeedItem["review_reactions"]) =>
       reactions.filter((reaction) => reaction.user_id !== userId);
@@ -234,12 +285,10 @@ export default function HomeScreen() {
     const userId = currentUserId;
     const liked = item.likeUserIds.includes(userId);
     const setLikes = (likeUserIds: string[]) =>
-      setFeed((current) =>
-        current.map((entry) =>
-          entry.kind === "restaurant" && entry.item.id === item.id
-            ? { ...entry, item: { ...entry.item, likeUserIds } }
-            : entry,
-        ),
+      updateFeeds((entry) =>
+        entry.kind === "restaurant" && entry.item.id === item.id
+          ? { ...entry, item: { ...entry.item, likeUserIds } }
+          : entry,
       );
     setLikes(
       liked
@@ -262,12 +311,13 @@ export default function HomeScreen() {
       Alert.alert("Like error", error.message);
     }
   }
-  // Restaurant ratings by you and the people you follow. Brand-wide ratings
-  // have no location, so they link to any of the brand's.
+  // Restaurant ratings by the given users (everyone when null). Brand-wide
+  // ratings have no location, so they link to any of the brand's.
   async function loadRestaurantFeed(
-    userIds: string[],
+    userIds: string[] | null,
+    limit: number,
   ): Promise<RestaurantFeedItem[]> {
-    const { data, error } = await supabase
+    let query = supabase
       .from("restaurant_ratings")
       .select(
         `
@@ -284,10 +334,11 @@ export default function HomeScreen() {
         restaurant_rating_comments (id)
       `,
       )
-      .in("user_id", userIds)
       .not("rating", "is", null)
       .order("visited_at", { ascending: false })
-      .limit(FEED_SIZE);
+      .limit(limit);
+    if (userIds) query = query.in("user_id", userIds);
+    const { data, error } = await query;
     if (error) {
       console.log("Restaurant feed error:", error.message);
       return [];
@@ -579,24 +630,47 @@ export default function HomeScreen() {
       </View>
     );
   }
-  if (loading) {
+  if (loading && tab === null) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" />
       </View>
     );
   }
+  const activeTab = tab ?? "popular";
+  const feed = feeds[activeTab];
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Wotri</Text>
       <Text style={styles.subtitle}>
         See what you and your friends are eating.
       </Text>
+      <View style={styles.tabs}>
+        {FEED_TABS.map(({ key, label }) => (
+          <TouchableOpacity
+            key={key}
+            style={[styles.tabButton, activeTab === key && styles.tabButtonActive]}
+            onPress={() => setTab(key)}
+          >
+            <Text
+              style={[styles.tabText, activeTab === key && styles.tabTextActive]}
+            >
+              {label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
       {feed.length === 0 ? (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>Your feed is empty</Text>
+          <Text style={styles.emptyTitle}>
+            {activeTab === "following"
+              ? "Nothing from your friends yet"
+              : "No reviews yet"}
+          </Text>
           <Text style={styles.emptyText}>
-            Log a dish or follow people in Discover to start building your feed.
+            {activeTab === "following"
+              ? "Follow people in Discover or log a dish to fill this tab."
+              : "Be the first: log a dish from the Log tab."}
           </Text>
         </View>
       ) : (
@@ -769,6 +843,30 @@ const styles = StyleSheet.create({
     color: Palette.textSecondary,
     marginTop: 8,
     marginBottom: 24,
+  },
+  tabs: {
+    flexDirection: "row",
+    backgroundColor: Palette.surface,
+    borderRadius: 10,
+    padding: 3,
+    marginBottom: 6,
+  },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  tabButtonActive: {
+    backgroundColor: Palette.elevated,
+  },
+  tabText: {
+    color: Palette.textMuted,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  tabTextActive: {
+    color: Palette.accent,
   },
   emptyState: {
     marginTop: 20,

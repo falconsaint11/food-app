@@ -1,5 +1,5 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { ReactNode, useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -39,10 +39,88 @@ type TopPicksEditorProps = {
 };
 
 const MAX_PICKS = 4;
+const SLOT_GAP = 8;
+
+type DraggableSlotProps = {
+  index: number;
+  count: number;
+  // Distance from one slot to the next.
+  step: number;
+  // How far to slide aside while another pick is dragged past this one.
+  shift: number;
+  onDragStart: (index: number) => void;
+  onHover: (target: number) => void;
+  onDrop: (from: number, to: number) => void;
+  children: ReactNode;
+};
+
+// A top-4 slot that can be dragged sideways to a new position. A plain tap
+// still reaches the slot's own button.
+function DraggableSlot({
+  index,
+  count,
+  step,
+  shift,
+  onDragStart,
+  onHover,
+  onDrop,
+  children,
+}: DraggableSlotProps) {
+  // Where the finger first touched, and how far it has dragged sideways.
+  const [start, setStart] = useState<{ x: number; y: number } | null>(null);
+  const [dragX, setDragX] = useState<number | null>(null);
+
+  function targetFor(dx: number) {
+    if (!step) return index;
+    return Math.max(0, Math.min(count - 1, Math.round(index + dx / step)));
+  }
+
+  function finish(to: number) {
+    setStart(null);
+    setDragX(null);
+    onDrop(index, to);
+  }
+
+  return (
+    <View
+      // Notes where a touch starts without taking it, so taps still reach
+      // the slot's button.
+      onStartShouldSetResponderCapture={(event) => {
+        setStart({ x: event.nativeEvent.pageX, y: event.nativeEvent.pageY });
+        return false;
+      }}
+      // Only a mostly sideways move starts a drag.
+      onMoveShouldSetResponder={(event) => {
+        if (!start) return false;
+        const dx = event.nativeEvent.pageX - start.x;
+        const dy = event.nativeEvent.pageY - start.y;
+        return Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy);
+      }}
+      onResponderGrant={() => onDragStart(index)}
+      onResponderMove={(event) => {
+        if (!start) return;
+        const dx = event.nativeEvent.pageX - start.x;
+        setDragX(dx);
+        onHover(targetFor(dx));
+      }}
+      onResponderRelease={() => finish(targetFor(dragX ?? 0))}
+      onResponderTerminate={() => finish(index)}
+      onResponderTerminationRequest={() => false}
+      style={[
+        styles.slotWrapper,
+        { transform: [{ translateX: dragX ?? shift }] },
+        dragX !== null && styles.slotDragging,
+      ]}
+    >
+      {children}
+    </View>
+  );
+}
 
 // Picks a profile's top 4 dishes or restaurants. The current picks sit in a
-// row at the top (tap to remove), with everything else the user rated below,
-// highest rated first, and a search box. Every change saves right away.
+// row at the top (tap to remove, drag to reorder), with everything else the
+// user rated below, highest rated first, and a search box. Every change saves
+// right away.
 export function TopPicksEditor({
   noun,
   rankingTable,
@@ -55,6 +133,9 @@ export function TopPicksEditor({
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'saving' | 'saved' | null>(null);
+  const [slotStep, setSlotStep] = useState(0);
+  // While a pick is dragged: where it started and where it would land.
+  const [drag, setDrag] = useState<{ from: number; to: number } | null>(null);
   const userIdRef = useRef<string | null>(null);
   // Saves run one after another so a quick second tap can't interleave
   // with the first one's delete and insert.
@@ -143,7 +224,7 @@ export function TopPicksEditor({
     if (selected.length >= MAX_PICKS) {
       Alert.alert(
         'Top 4 is full',
-        `Tap one of your top ${noun} to remove it first.`
+        `Tap one of your top ${noun} to remove it first. New picks go last, and you can drag them into place.`
       );
       return;
     }
@@ -157,6 +238,29 @@ export function TopPicksEditor({
     const next = selected.filter((item) => item !== key);
     setSelected(next);
     save(next);
+  }
+
+  function move(from: number, to: number) {
+    setDrag(null);
+    if (from === to) return;
+
+    const next = [...selected];
+    const [picked] = next.splice(from, 1);
+    next.splice(to, 0, picked);
+    setSelected(next);
+    save(next);
+  }
+
+  // Slots between the dragged pick and where it would land slide over by one.
+  function shiftFor(index: number) {
+    if (!drag || index === drag.from) return 0;
+    if (drag.from < drag.to && index > drag.from && index <= drag.to) {
+      return -slotStep;
+    }
+    if (drag.from > drag.to && index >= drag.to && index < drag.from) {
+      return slotStep;
+    }
+    return 0;
   }
 
   if (loading) {
@@ -186,11 +290,18 @@ export function TopPicksEditor({
               ? 'Saving…'
               : saveStatus === 'saved'
                 ? 'Saved'
-                : 'Tap to remove'}
+                : 'Tap to remove · drag to reorder'}
           </Text>
         </View>
 
-        <View style={styles.slots}>
+        <View
+          style={styles.slots}
+          onLayout={(event) => {
+            const width = event.nativeEvent.layout.width;
+            const slotWidth = (width - SLOT_GAP * (MAX_PICKS - 1)) / MAX_PICKS;
+            setSlotStep(slotWidth + SLOT_GAP);
+          }}
+        >
           {Array.from({ length: MAX_PICKS }, (_, index) => {
             const key = selected[index];
             const option = options.find((item) => item.key === key);
@@ -203,27 +314,47 @@ export function TopPicksEditor({
               );
             }
 
+            // While dragging, the numbers show the order it will save in.
+            const shownRank =
+              drag && index === drag.from
+                ? drag.to + 1
+                : index + 1 + Math.sign(shiftFor(index));
+
             return (
-              <TouchableOpacity
+              <DraggableSlot
                 key={key}
-                style={styles.slot}
-                onPress={() => remove(key)}
+                index={index}
+                count={selected.length}
+                step={slotStep}
+                shift={shiftFor(index)}
+                onDragStart={(from) => setDrag({ from, to: from })}
+                onHover={(to) =>
+                  setDrag((current) =>
+                    current && current.to !== to ? { ...current, to } : current
+                  )
+                }
+                onDrop={move}
               >
-                <View style={styles.slotTop}>
-                  <View style={styles.rankBadge}>
-                    <Text style={styles.rankBadgeText}>#{index + 1}</Text>
+                <TouchableOpacity
+                  style={[styles.slot, styles.filledSlot]}
+                  onPress={() => remove(key)}
+                >
+                  <View style={styles.slotTop}>
+                    <View style={styles.rankBadge}>
+                      <Text style={styles.rankBadgeText}>#{shownRank}</Text>
+                    </View>
+                    <Text style={styles.removeIcon}>✕</Text>
                   </View>
-                  <Text style={styles.removeIcon}>✕</Text>
-                </View>
-                <Text style={styles.slotName} numberOfLines={3}>
-                  {option?.name ?? 'Unknown'}
-                </Text>
-                {option?.rating != null ? (
-                  <Text style={styles.slotRating}>
-                    {formatRating(option.rating, isPremium)}★
+                  <Text style={styles.slotName} numberOfLines={2}>
+                    {option?.name ?? 'Unknown'}
                   </Text>
-                ) : null}
-              </TouchableOpacity>
+                  {option?.rating != null ? (
+                    <Text style={styles.slotRating}>
+                      {formatRating(option.rating, isPremium)}★
+                    </Text>
+                  ) : null}
+                </TouchableOpacity>
+              </DraggableSlot>
             );
           })}
         </View>
@@ -312,8 +443,22 @@ const styles = StyleSheet.create({
   },
   slots: {
     flexDirection: 'row',
-    gap: 8,
+    gap: SLOT_GAP,
     marginBottom: 14,
+  },
+  slotWrapper: {
+    flex: 1,
+  },
+  // Inside the drag wrapper the card grows with its text instead of
+  // being squeezed to the wrapper's height.
+  filledSlot: {
+    flex: 0,
+    flexGrow: 1,
+  },
+  slotDragging: {
+    zIndex: 10,
+    elevation: 10,
+    opacity: 0.9,
   },
   slot: {
     flex: 1,
@@ -358,9 +503,9 @@ const styles = StyleSheet.create({
   },
   slotName: {
     color: Palette.text,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
-    lineHeight: 16,
+    lineHeight: 15,
   },
   search: {
     backgroundColor: Palette.surface,
