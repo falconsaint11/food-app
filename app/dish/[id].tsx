@@ -21,6 +21,7 @@ import {
   getBrandLocationsNearestFirst,
 } from '@/lib/brands';
 import { useIsCurator } from '@/lib/admin';
+import { flavorList, type ReviewFlavorRow } from '@/lib/dishes';
 import { withoutHiddenUsers } from '@/lib/moderation';
 import { formatAverage, formatRating, useIsPremium } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
@@ -64,7 +65,33 @@ type DishReview = {
     username: string;
     display_name: string | null;
   } | null;
+  // The flavor a one-flavor review is on, or the plain dish.
+  dishes: { name: string; variant_label: string | null } | null;
+  // The flavors picked on a review with several.
+  review_flavors: ReviewFlavorRow[];
 };
+
+const REVIEW_SELECT = `
+  id,
+  user_id,
+  rating,
+  review_text,
+  date_eaten,
+  created_at,
+  profiles:user_id (
+    username,
+    display_name
+  ),
+  dishes (name, variant_label),
+  review_flavors (
+    dishes (name, variant_label)
+  )
+`;
+
+// Which flavors a review is about, like "Pistachio" or "Chicken & Steak".
+function reviewFlavors(review: DishReview) {
+  return flavorList(review.review_flavors) || review.dishes?.variant_label || '';
+}
 
 // The dish this one is a variant of, or one of its variants.
 type RelatedDish = {
@@ -146,6 +173,9 @@ export default function DishDetailScreen() {
 
     // The same dish at other locations of this brand counts as one dish.
     let sameDishIds = [dishRow.id];
+    // Every location's rows for this dish's flavors and types, whose reviews
+    // count toward this dish's rating.
+    let flavorDishIds: string[] = [];
     // A cover pinned on this dish at any location of the brand.
     let pinnedReviewId = dishRow.cover_review_id;
     setParentDish(null);
@@ -174,6 +204,9 @@ export default function DishDetailScreen() {
         );
 
         sameDishIds = sameDishes.map((sibling) => sibling.id as string);
+        flavorDishIds = (siblingData ?? [])
+          .filter((sibling) => sibling.variant_of === dishRow.name_key)
+          .map((sibling) => sibling.id as string);
 
         // One row per dish name, preferring this location's.
         const related = new Map<string, RelatedDish>();
@@ -225,22 +258,40 @@ export default function DishDetailScreen() {
     setCoverPhotos(await fetchCoverPhotos(sameDishIds, pinnedReviewId));
     setDishTags(await fetchDishPublicTags(sameDishIds));
 
-    const { data: reviewData, error: reviewError } = await supabase
-      .from('reviews')
-      .select(`
-        id,
-        user_id,
-        rating,
-        review_text,
-        date_eaten,
-        created_at,
-        profiles:user_id (
-          username,
-          display_name
-        )
-      `)
-      .in('dish_id', sameDishIds)
-      .order('created_at', { ascending: false });
+    // A plain dish counts its flavors' reviews too. A flavor also counts
+    // reviews that picked it alongside other flavors, which sit on the plain
+    // dish.
+    const { data: flavorPicks } = dishRow.variant_of
+      ? await supabase
+          .from('review_flavors')
+          .select('review_id')
+          .in('dish_id', sameDishIds)
+      : { data: [] };
+    const pickedReviewIds = [
+      ...new Set((flavorPicks ?? []).map((row) => String(row.review_id))),
+    ];
+
+    const [direct, picked] = await Promise.all([
+      supabase
+        .from('reviews')
+        .select(REVIEW_SELECT)
+        .in('dish_id', [...sameDishIds, ...flavorDishIds]),
+      pickedReviewIds.length > 0
+        ? supabase.from('reviews').select(REVIEW_SELECT).in('id', pickedReviewIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    const reviewError = direct.error ?? picked.error;
+
+    const reviewsById = new Map<string, DishReview>();
+    for (const review of [
+      ...((direct.data ?? []) as unknown as DishReview[]),
+      ...((picked.data ?? []) as unknown as DishReview[]),
+    ]) {
+      reviewsById.set(review.id, review);
+    }
+    const reviewData = [...reviewsById.values()].sort((a, b) =>
+      b.created_at.localeCompare(a.created_at)
+    );
 
     if (reviewError) {
       setLoading(false);
@@ -248,8 +299,7 @@ export default function DishDetailScreen() {
       return;
     }
 
-    const typedReviews =
-      (reviewData ?? []) as unknown as DishReview[];
+    const typedReviews = reviewData;
 
     // Blocked people's ratings still count toward the average; only their
     // reviews are hidden.
@@ -271,7 +321,7 @@ export default function DishDetailScreen() {
     const { count, error: rankingError } = await supabase
       .from('dish_rankings')
       .select('*', { count: 'exact', head: true })
-      .in('dish_id', sameDishIds);
+      .in('dish_id', [...sameDishIds, ...flavorDishIds]);
 
     setLoading(false);
 
@@ -566,6 +616,11 @@ export default function DishDetailScreen() {
                   </Text>
                 </View>
 
+                {reviewFlavors(review) &&
+                reviewFlavors(review) !== dish.variant_label ? (
+                  <Text style={styles.reviewFlavor}>{reviewFlavors(review)}</Text>
+                ) : null}
+
                 {review.review_text ? (
                   <Text
                     style={styles.reviewText}
@@ -784,6 +839,12 @@ const styles = StyleSheet.create({
     color: Palette.accent,
     fontSize: 16,
     fontWeight: '700',
+  },
+  reviewFlavor: {
+    color: Palette.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 6,
   },
   reviewText: {
     color: Palette.text,
