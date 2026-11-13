@@ -15,6 +15,7 @@ import {
 import { Palette } from "@/constants/theme";
 import { withFlag } from "@/lib/countries";
 import { withFlavors, type ReviewFlavorRow } from "@/lib/dishes";
+import { withoutHiddenUsers } from "@/lib/moderation";
 type ReactionType = "😂" | "🔥" | "🤤" | "❤️";
 type FeedItem = {
   id: string;
@@ -220,7 +221,10 @@ export default function HomeScreen() {
       })),
     ];
     entries.sort((a, b) => b.at.localeCompare(a.at));
-    return entries.slice(0, limit);
+    // Popular and Recent show everyone, so leave out people you blocked or
+    // who blocked you.
+    const visible = await withoutHiddenUsers(entries, (entry) => entry.item.user_id);
+    return visible.slice(0, limit);
   }
   // A post can appear in more than one tab, so likes update every tab.
   function updateFeeds(change: (entry: FeedEntry) => FeedEntry) {
