@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 
 import { Palette } from '@/constants/theme';
+import { openLegalPage } from '@/lib/legal';
 import { unblockUser } from '@/lib/moderation';
 import { supabase } from '@/lib/supabase';
 
@@ -407,6 +408,32 @@ export default function SettingsScreen() {
               )}
             </View>
           ) : null}
+        </View>
+
+        <Text style={[styles.sectionTitle, styles.privacyTitle]}>About</Text>
+
+        <View style={styles.group}>
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => openLegalPage('terms')}
+          >
+            <Text style={styles.rowLabel}>Terms of Use</Text>
+            <Text style={styles.rowHint}>›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => openLegalPage('privacy')}
+          >
+            <Text style={styles.rowLabel}>Privacy Policy</Text>
+            <Text style={styles.rowHint}>›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.row, styles.lastRow]}
+            onPress={() => openLegalPage('support')}
+          >
+            <Text style={styles.rowLabel}>Help & Support</Text>
+            <Text style={styles.rowHint}>›</Text>
+          </TouchableOpacity>
         </View>
 
         <TouchableOpacity style={styles.logOutButton} onPress={confirmLogOut}>

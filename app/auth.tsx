@@ -1,3 +1,4 @@
+import { openLegalPage } from "@/lib/legal";
 import { supabase } from "@/lib/supabase";
 import { useState } from "react";
 import {
@@ -156,6 +157,25 @@ export default function AuthScreen() {
                 </Text>
               )}
             </TouchableOpacity>
+            {screen === "signup" ? (
+              <Text style={styles.agreeText}>
+                By creating an account, you agree to our{" "}
+                <Text
+                  style={styles.agreeLink}
+                  onPress={() => openLegalPage("terms")}
+                >
+                  Terms of Use
+                </Text>{" "}
+                and{" "}
+                <Text
+                  style={styles.agreeLink}
+                  onPress={() => openLegalPage("privacy")}
+                >
+                  Privacy Policy
+                </Text>
+                .
+              </Text>
+            ) : null}
             <TouchableOpacity
               style={styles.secondaryButton}
               onPress={() =>
@@ -222,6 +242,14 @@ const styles = StyleSheet.create({
     lineHeight: 23,
     marginBottom: 36,
   },
+  agreeText: {
+    color: "#8B8B8B",
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: "center",
+    marginTop: 14,
+  },
+  agreeLink: { color: "#DADADA", textDecorationLine: "underline" },
   label: { color: "#EAEAEA", fontWeight: "600", fontSize: 14, marginBottom: 8 },
   input: {
     backgroundColor: "#242424",
