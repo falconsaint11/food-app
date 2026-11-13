@@ -33,6 +33,7 @@ One entry per menu item, even when it comes with choices: "Quesadilla - add prot
 - options: short notes on the choices printed for that dish, like "Add protein +$3", "Soft or crunchy", "Black or pinto beans", "Small $3.25 / Big $6". Choices printed for a whole section ("any taco soft or crunchy", "double stack any taco +$2") go on every dish in that section. Skip upgrades offered on every item on the menu.
 - variants: when the menu names the flavors or proteins a dish comes in, and picking one makes it a noticeably different dish, list them as short labels: "Margaritas - mango, strawberry, lime" gives ["Mango", "Strawberry", "Lime"]; "Quesadilla - chicken, steak or shrimp +$3" gives ["Chicken", "Steak", "Shrimp"]. Use [] when the menu doesn't name them ("add protein +$3" alone). Small choices that don't change the dish much (soft or crunchy, bean type, size) go in options instead.
 - price: the lowest price. For "$3.25/6", that's 3.25, with the sizes in options.
+- A pizza sold both by the slice and as a whole pie is one dish, not two: list the pie once (like "Pepperoni Pizza") with "Slice" in its options, and leave out the separate "Pepperoni Slice". A slice with no matching pie on the menu (like "Dessert Slice") stays its own dish.
 - If two different items share a name (a kids' quesadilla and a regular one), make the names distinct, like "Kids Quesadilla".
 
 Tags: choose from the allowed list only.
