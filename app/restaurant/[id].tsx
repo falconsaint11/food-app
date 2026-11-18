@@ -28,6 +28,7 @@ import {
   getBrandLocationsNearestFirst,
 } from '@/lib/brands';
 import { useIsCurator } from '@/lib/admin';
+import { dishIcon } from '@/lib/dish-icon';
 import { uploadPhoto } from '@/lib/photos';
 import { withoutHiddenUsers } from '@/lib/moderation';
 import { formatAverage, formatRating, useIsPremium } from '@/lib/ratings';
@@ -783,6 +784,8 @@ export default function RestaurantDetailScreen() {
         : 0;
     const variantCount = options.variants?.length ?? 0;
     const availability = dish.tags.filter((tag) => AVAILABILITY_LABELS[tag]);
+    // A dish's best photo, or one of its flavors', else an icon.
+    const thumbPath = family.find((item) => item.photoPath)?.photoPath ?? null;
 
     return (
       <TouchableOpacity
@@ -795,6 +798,23 @@ export default function RestaurantDetailScreen() {
           })
         }
       >
+        {options.asVariant ? null : (
+          <View style={styles.dishThumb}>
+            {thumbPath ? (
+              <Image
+                source={{ uri: getPhotoUrl(thumbPath) }}
+                style={StyleSheet.absoluteFill}
+                contentFit="cover"
+                transition={150}
+              />
+            ) : (
+              <Text style={styles.dishThumbIcon}>
+                {dishIcon(dish.name, dish.tags)}
+              </Text>
+            )}
+          </View>
+        )}
+
         <View style={styles.dishInfo}>
           <View style={styles.dishNameRow}>
             <Text
@@ -1872,7 +1892,8 @@ const styles = StyleSheet.create({
     borderBottomColor: Palette.border,
   },
   variantRow: {
-    paddingLeft: 20,
+    // Lines flavors up under their dish's name, past its thumbnail.
+    paddingLeft: 56,
     paddingVertical: 10,
   },
   variantName: {
@@ -1887,6 +1908,19 @@ const styles = StyleSheet.create({
   dishInfo: {
     flex: 1,
     paddingRight: 16,
+  },
+  dishThumb: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    marginRight: 12,
+    overflow: 'hidden',
+    backgroundColor: Palette.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dishThumbIcon: {
+    fontSize: 22,
   },
   dishNameRow: {
     flexDirection: 'row',

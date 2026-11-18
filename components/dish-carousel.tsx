@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { Palette } from '@/constants/theme';
+import { dishIcon } from '@/lib/dish-icon';
 import { formatAverage } from '@/lib/ratings';
 import { supabase } from '@/lib/supabase';
 
@@ -12,6 +13,8 @@ export type CarouselDish = {
   averageRating: number;
   reviewCount: number;
   photoPath: string | null;
+  // Picks the icon shown when there's no photo.
+  tags?: string[];
   tried: boolean;
   // The viewer's own latest rating, shown instead of the average with
   // showMine.
@@ -58,9 +61,7 @@ export function DishCarousel({
                 transition={150}
               />
             ) : (
-              <Text style={styles.initial}>
-                {dish.name.trim().charAt(0).toUpperCase()}
-              </Text>
+              <Text style={styles.icon}>{dishIcon(dish.name, dish.tags)}</Text>
             )}
 
             <View style={styles.rankBadge}>
@@ -114,10 +115,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  initial: {
-    color: Palette.borderStrong,
+  icon: {
     fontSize: 44,
-    fontWeight: '800',
   },
   rankBadge: {
     position: 'absolute',

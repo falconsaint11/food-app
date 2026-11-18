@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { Palette } from "@/constants/theme";
 import { withFlag } from "@/lib/countries";
+import { dishIcon } from "@/lib/dish-icon";
 import { withFlavors, type ReviewFlavorRow } from "@/lib/dishes";
 import { withoutHiddenUsers } from "@/lib/moderation";
 type ReactionType = "😂" | "🔥" | "🤤" | "❤️";
@@ -707,6 +708,13 @@ export default function HomeScreen() {
                 `Eaten ${formatDate(item.date_eaten, item.created_at)}`,
               )}
               <View style={styles.foodRow}>
+                {photoUrl ? null : (
+                  <View style={styles.dishIconTile}>
+                    <Text style={styles.dishIconText}>
+                      {dishIcon(item.dishes?.name ?? "")}
+                    </Text>
+                  </View>
+                )}
                 <View style={styles.foodInfo}>
                   <TouchableOpacity
                     onPress={() =>
@@ -942,6 +950,19 @@ const styles = StyleSheet.create({
   foodInfo: {
     flex: 1,
     paddingRight: 16,
+  },
+  // Stands in for the photo on reviews without one.
+  dishIconTile: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    marginRight: 12,
+    backgroundColor: Palette.elevated,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dishIconText: {
+    fontSize: 22,
   },
   dishName: {
     color: Palette.text,

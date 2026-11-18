@@ -14,6 +14,9 @@ export type PhotoCard = {
   // Shown after the rating ("12 reviews", "0.8 mi").
   meta?: string;
   photoPath?: string | null;
+  // Shown instead of the title's first letter when there's no photo (an
+  // emoji from dishIcon for dishes).
+  icon?: string;
   // Small label over the photo's corner ("#1", "New").
   badge?: string;
   onPress: () => void;
@@ -29,8 +32,8 @@ export function reviewPhotoUrl(path: string) {
     .publicUrl;
 }
 
-// A sideways row of photo cards. Cards without a photo show the title's
-// first letter.
+// A sideways row of photo cards. Cards without a photo show their icon, or
+// the title's first letter.
 export function PhotoCardRow({
   cards,
   size = 'medium',
@@ -64,8 +67,8 @@ export function PhotoCardRow({
                 transition={150}
               />
             ) : (
-              <Text style={styles.initial}>
-                {card.title.trim().charAt(0).toUpperCase()}
+              <Text style={card.icon ? styles.icon : styles.initial}>
+                {card.icon ?? card.title.trim().charAt(0).toUpperCase()}
               </Text>
             )}
 
@@ -120,6 +123,9 @@ const styles = StyleSheet.create({
     color: Palette.borderStrong,
     fontSize: 44,
     fontWeight: '800',
+  },
+  icon: {
+    fontSize: 44,
   },
   badge: {
     position: 'absolute',

@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fetchCoverPhotos } from '@/components/cover-photos';
 import { PhotoCard, PhotoCardRow } from '@/components/photo-card-row';
+import { dishIcon } from '@/lib/dish-icon';
 import { MapRestaurant, RestaurantMap } from '@/components/restaurant-map';
 import { Palette } from '@/constants/theme';
 import {
@@ -890,6 +891,7 @@ export default function DiscoverScreen() {
         rating: Number(row.average_rating),
         meta: reviewsText(row.review_count),
         photoPath: photoByDish.get(row.dish_id) ?? null,
+        icon: dishIcon(row.name),
         badge: `#${index + 1}`,
         onPress: () =>
           router.push({ pathname: '/dish/[id]', params: { id: row.dish_id } }),
@@ -1088,6 +1090,7 @@ export default function DiscoverScreen() {
       rating: Number(review.rating),
       ratingDigits: 1,
       photoPath: review.photo_path,
+      icon: dishIcon(review.dishes?.name ?? ''),
       onPress: () =>
         router.push({ pathname: '/review/[id]', params: { id: review.id } }),
     };
@@ -1344,7 +1347,7 @@ export default function DiscoverScreen() {
         }
       >
         <View style={styles.resultIcon}>
-          <Text style={styles.resultEmoji}>🍴</Text>
+          <Text style={styles.resultEmoji}>{dishIcon(dish.name)}</Text>
         </View>
         <View style={styles.resultText}>
           <Text style={styles.primaryText}>{dish.name}</Text>
@@ -1482,6 +1485,7 @@ export default function DiscoverScreen() {
                 rating: stats.averageRating,
                 meta: reviewsText(stats.count),
                 photoPath: stats.photoPath,
+                icon: dishIcon(stats.name),
                 badge: `#${index + 1}`,
                 onPress: () =>
                   router.push({ pathname: '/dish/[id]', params: { id: stats.id } }),
