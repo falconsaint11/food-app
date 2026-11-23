@@ -23,7 +23,9 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.wotri.app",
-      "blockedPermissions": ["android.permission.RECORD_AUDIO"],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION"
@@ -81,6 +83,12 @@
         "projectId": "3e13c925-1bcd-4db7-bbce-555078a5f52f"
       }
     },
-    "owner": "stars-food-app"
+    "owner": "stars-food-app",
+    "updates": {
+      "url": "https://u.expo.dev/3e13c925-1bcd-4db7-bbce-555078a5f52f"
+    },
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    }
   }
 }
