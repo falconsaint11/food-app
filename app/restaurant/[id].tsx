@@ -23,6 +23,7 @@ import {
 } from '@/components/cover-photos';
 import { DishCarousel } from '@/components/dish-carousel';
 import { RateRestaurantButton } from '@/components/rate-restaurant-button';
+import { RestaurantTags } from '@/components/restaurant-tags';
 import {
   getBrandLocationIds,
   getBrandLocationsNearestFirst,
@@ -1048,6 +1049,8 @@ export default function RestaurantDetailScreen() {
             </Text>
           </View>
         </View>
+
+        <RestaurantTags restaurantId={restaurant.id} />
 
         <View style={styles.actions}>
           <RateRestaurantButton
