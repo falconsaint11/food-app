@@ -23,8 +23,13 @@
 // you"), it runs a Text Search instead: up to 20 places, nearest first, in
 // the same shape. It costs more than autocomplete, so it only runs on tap.
 //
+// Only signed-in users can search, up to a limit an hour (see
+// claim_places_search()), since every search is a paid Google call.
+//
 // Request:  { input, latitude?, longitude?, sessionToken?, foodOnly?, nearby? }
 // Response: { suggestions: [{ placePrediction: { placeId, text, structuredFormat, types } }] }
+
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const FOOD_PRIMARY_TYPES = [
   "restaurant",
@@ -207,11 +212,40 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Acts as the signed-in user, so auth.uid() works in the limit check.
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      {
+        global: {
+          headers: { Authorization: req.headers.get("Authorization") ?? "" },
+        },
+      },
+    );
+
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      return json({ error: "Sign in to search." }, 401);
+    }
+
     const { input, latitude, longitude, sessionToken, foodOnly, nearby } =
       await req.json();
 
     if (typeof input !== "string" || input.trim().length < 3) {
       return json({ suggestions: [] });
+    }
+
+    const nearbyRequest = Boolean(nearby) &&
+      typeof latitude === "number" &&
+      typeof longitude === "number";
+
+    const { error: limitError } = await supabase.rpc("claim_places_search", {
+      p_cost: nearbyRequest ? 5 : 1,
+    });
+
+    if (limitError) {
+      return json({ error: limitError.message }, 429);
     }
 
     const apiKey = Deno.env.get("GOOGLE_PLACES_API_KEY");
@@ -220,11 +254,7 @@ Deno.serve(async (req) => {
       throw new Error("Google Places API key is missing.");
     }
 
-    if (
-      nearby &&
-      typeof latitude === "number" &&
-      typeof longitude === "number"
-    ) {
+    if (nearbyRequest) {
       return json({
         suggestions: await nearbySearch(apiKey, input.trim(), latitude, longitude),
       });
