@@ -129,10 +129,14 @@ Deno.serve(async (req) => {
         <p><a href="${dashboardUrl}">Open the reports table in Supabase</a></p>
       </div>`;
 
+    // Trimmed, since a pasted secret often picks up a space or newline.
+    const resendKey = (Deno.env.get("RESEND_API_KEY") ?? "").trim()
+      .replace(/^["']|["']$/g, "");
+
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${Deno.env.get("RESEND_API_KEY")}`,
+        "Authorization": `Bearer ${resendKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -145,7 +149,15 @@ Deno.serve(async (req) => {
     });
 
     if (!response.ok) {
-      console.error("Resend error:", response.status, await response.text());
+      // The key's shape, never the key, to tell a bad paste from a revoked key.
+      console.error(
+        "Resend error:",
+        response.status,
+        await response.text(),
+        `(RESEND_API_KEY set: ${resendKey.length > 0}, starts with re_: ${
+          resendKey.startsWith("re_")
+        }, length: ${resendKey.length})`,
+      );
       return new Response("Email failed", { status: 502 });
     }
 
