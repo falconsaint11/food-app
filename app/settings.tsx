@@ -468,63 +468,70 @@ export default function SettingsScreen() {
           if (!deleting) setDeleteOpen(false);
         }}
       >
-        <Pressable
-          style={styles.backdrop}
-          onPress={() => {
-            if (!deleting) setDeleteOpen(false);
-          }}
-        />
-
-        <View style={styles.sheet}>
-          <Text style={styles.sheetTitle}>Delete your account?</Text>
-
-          <Text style={styles.sheetText}>
-            Your profile, reviews, photos, lists, rankings, restaurant ratings
-            and follows will be permanently deleted. Type {DELETE_CONFIRMATION}{' '}
-            to confirm.
-          </Text>
-
-          <TextInput
-            style={styles.input}
-            placeholder={DELETE_CONFIRMATION}
-            placeholderTextColor={Palette.textMuted}
-            autoCapitalize="characters"
-            autoCorrect={false}
-            value={deleteText}
-            onChangeText={setDeleteText}
-            editable={!deleting}
+        {/* A modal sits outside the screen's KeyboardAvoidingView, so the
+            sheet needs its own to stay above the keyboard. */}
+        <KeyboardAvoidingView
+          style={styles.modalFill}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <Pressable
+            style={styles.backdrop}
+            onPress={() => {
+              if (!deleting) setDeleteOpen(false);
+            }}
           />
 
-          <TouchableOpacity
-            style={[
-              styles.confirmDeleteButton,
-              (deleteText.trim().toUpperCase() !== DELETE_CONFIRMATION ||
-                deleting) &&
-                styles.disabled,
-            ]}
-            onPress={deleteAccount}
-            disabled={
-              deleteText.trim().toUpperCase() !== DELETE_CONFIRMATION ||
-              deleting
-            }
-          >
-            {deleting ? (
-              <ActivityIndicator color={Palette.text} />
-            ) : (
-              <Text style={styles.confirmDeleteText}>
-                Permanently delete account
-              </Text>
-            )}
-          </TouchableOpacity>
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>Delete your account?</Text>
 
-          <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={() => setDeleteOpen(false)}
-            disabled={deleting}
-          >
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
+            <Text style={styles.sheetText}>
+              Your profile, reviews, photos, lists, rankings, restaurant ratings
+              and follows will be permanently deleted. Type {DELETE_CONFIRMATION}{' '}
+              to confirm.
+            </Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder={DELETE_CONFIRMATION}
+              placeholderTextColor={Palette.textMuted}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              value={deleteText}
+              onChangeText={setDeleteText}
+              editable={!deleting}
+            />
+
+            <TouchableOpacity
+              style={[
+                styles.confirmDeleteButton,
+                (deleteText.trim().toUpperCase() !== DELETE_CONFIRMATION ||
+                  deleting) &&
+                  styles.disabled,
+              ]}
+              onPress={deleteAccount}
+              disabled={
+                deleteText.trim().toUpperCase() !== DELETE_CONFIRMATION ||
+                deleting
+              }
+            >
+              {deleting ? (
+                <ActivityIndicator color={Palette.text} />
+              ) : (
+                <Text style={styles.confirmDeleteText}>
+                  Permanently delete account
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => setDeleteOpen(false)}
+              disabled={deleting}
+            >
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </KeyboardAvoidingView>
   );
@@ -666,6 +673,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     marginTop: 10,
+  },
+  modalFill: {
+    flex: 1,
   },
   backdrop: {
     flex: 1,
